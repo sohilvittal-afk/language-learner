@@ -27,6 +27,7 @@
         <table id="usersTable">
           <thead>
             <tr>
+              <th>Username</th>
               <th>Email</th>
               <th>Display name</th>
               <th>Status</th>
@@ -61,6 +62,9 @@
       tbody.innerHTML = '';
       users.forEach((u) => {
         const tr = document.createElement('tr');
+
+        const usernameTd = document.createElement('td');
+        usernameTd.textContent = u.username;
 
         const emailTd = document.createElement('td');
         emailTd.textContent = u.email;
@@ -105,7 +109,7 @@
         saveBtn.textContent = 'Save';
         actionTd.appendChild(saveBtn);
 
-        tr.append(emailTd, nameTd, statusTd, roleTd, actionTd);
+        tr.append(usernameTd, emailTd, nameTd, statusTd, roleTd, actionTd);
         tbody.appendChild(tr);
 
         saveBtn.addEventListener('click', async () => {
@@ -123,7 +127,7 @@
           });
           const patchData = await patchRes.json();
           msg.textContent = patchRes.ok
-            ? `Saved ${u.email}.`
+            ? `Saved ${u.username}.`
             : (patchData.error || 'Update failed.');
           msg.style.color = patchRes.ok ? 'var(--accent)' : 'var(--error)';
         });
@@ -135,7 +139,7 @@
       const data = await res.json();
 
       document.getElementById('welcome').textContent = data.loggedIn
-        ? `Logged in as ${data.email}`
+        ? `Logged in as ${data.username}`
         : 'Not logged in.';
 
       if (!data.loggedIn) return;

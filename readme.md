@@ -2,16 +2,16 @@
 
 ## Set up Supabase
 
-1. Create a project at [supabase.com](https://supabase.com) (or use an existing one).
-2. Email/password auth is on by default — nothing to enable in the dashboard.
-3. Copy the project URL and `anon` public key from **Settings → API**.
-4. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
-5. Also copy the **service_role** secret key from the same **Settings → API** page into `SUPABASE_SERVICE_ROLE_KEY` — it powers the admin user-management API (`/api/users`) and must never be exposed to the browser.
-6. Open **SQL Editor** in your Supabase project and run `supabase/profiles.sql` once — this creates the `profiles` table that backs role-based access on the dashboard.
+This app does not use Supabase Auth — it manages its own accounts in two tables
+and talks to Supabase only through the service role key (RLS is enabled on
+both tables with zero policies, so nothing gets in except via that key).
 
-By default Supabase requires users to confirm their email before they can log in
-(**Authentication → Providers → Email → Confirm email**). Turn that off in the
-dashboard if you want to log in immediately after registering during local dev.
+1. Create a project at [supabase.com](https://supabase.com) (or use an existing one).
+2. Copy the project URL and the **service_role** secret key from **Settings → API**.
+3. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+4. Open **SQL Editor** in your Supabase project and run, in order:
+   1. `supabase/users.sql` — creates the `users` table (username, email, bcrypt password hash).
+   2. `supabase/profiles.sql` — creates the `profiles` table (role, display name, status, notes), linked 1:1 to `users`.
 
 ## Run it
 
@@ -24,26 +24,34 @@ Then open http://localhost:4000 (redirects to the login page)
 
 ## What's actually happening
 
-- Registration and login go straight to Supabase Auth (`supabase.auth.signUp` /
-  `signInWithPassword`) — this app never stores an email or password itself.
-  Supabase hashes and stores credentials on its end; our server only ever holds
-  a session pointer (the user's id) and a Supabase user id.
+- Registration and login are handled entirely by this app. Passwords are
+  hashed with bcrypt (`bcryptjs`, 12 rounds) in `server.js` before being
+  written to the `users` table's `password_hash` column — plaintext and
+  reversible encryption are never used, and Supabase never sees the raw
+  password.
+- Login accepts either username or email, looked up in two separate `eq()`
+  queries (not a single interpolated `.or()` filter) to keep the identifier
+  out of any hand-built filter string.
+- A failed login always runs `bcrypt.compare` once — against the real hash if
+  the account exists, against a fixed dummy hash if it doesn't — so response
+  timing doesn't leak which usernames/emails are registered. The error message
+  is identical either way, too.
 - Sessions are server-side (`express-session`), tied to an httpOnly cookie your JS can't read or steal via XSS.
 - `/dashboard.html` is protected server-side by middleware, not by hiding a link — you can't get in by guessing the URL.
-- Login and "user doesn't exist" return the identical error, so an attacker can't enumerate valid emails.
 - `/api/login` and `/api/register` are rate-limited per IP (`express-rate-limit`) — 5 login attempts per 15 minutes, 10 signups per hour — so brute-forcing or spamming accounts gets a `429` instead of unlimited tries.
-- Every user has a role — `user`, `admin`, or `super_admin` — plus `display_name`, `status` (`active`/`disabled`), and `notes`, all stored in the `profiles` table (`supabase/profiles.sql`). A row is created automatically with role `user` the first time someone logs in. `/dashboard.html` shows different panels depending on role, and `/api/me` reports the role alongside the session's email.
-- Admins and super admins see a **User Management** panel on the dashboard, backed by `GET /api/users` and `PATCH /api/users/:id`. Both routes check the caller's role in Express (`requireRole`) and then use the Supabase **service role** key, which bypasses row-level security — RLS on `profiles` still only allows a user to read their own row, so this admin path is the one deliberate exception, gated entirely by application code.
+- Every user has a role — `user`, `admin`, or `super_admin` — plus `display_name`, `status` (`active`/`disabled`), and `notes`, all stored in the `profiles` table, linked 1:1 to `users`. A row is created at registration (with a lazy-create fallback on login, in case one is ever missing). `/dashboard.html` shows different panels depending on role, and `/api/me` reports it alongside the session's username/email.
+- Admins and super admins see a **User Management** panel on the dashboard, backed by `GET /api/users` (joins `users` + `profiles`) and `PATCH /api/users/:id`. Both routes check the caller's role in Express (`requireRole`) before touching Supabase — there's no RLS policy backing this up, since there's no Supabase Auth session for RLS to key off of, so this authorization check is the only gate and needs to stay correct.
   - Admins can edit any user's `display_name` and `status`.
   - Only super admins can change `role`, and a super admin can't change their own role (avoids locking yourself out).
   - Promoting the *first* super admin still has to happen manually: open **Table Editor → profiles** in Supabase and edit the `role` column directly, since there's no one with super-admin rights yet to do it through the app.
 
 ## Known gaps you should close before this touches the internet
 
+- Rolling your own auth means you now own everything Supabase Auth used to give you for free: no password-reset/forgot-password flow exists, no email verification, no breach-password checking, no built-in abuse detection beyond the IP rate limiter below. Worth weighing before this goes further.
 - The session secret in `server.js` falls back to a placeholder if `SESSION_SECRET` isn't set — always set it via `.env` outside local dev.
-- The rate limiter keys on IP address, which is easy to work around with rotating IPs/proxies — fine as a first line of defense, not a substitute for Supabase's own abuse protections.
-- No HTTPS here — cookies marked `httpOnly` still travel in plaintext over HTTP. Fine for localhost, not fine once this leaves your machine.
-- `.env` holds your Supabase keys — it's already gitignored, but double-check it never gets committed.
+- The rate limiter keys on IP address, which is easy to work around with rotating IPs/proxies.
+- No HTTPS here — cookies marked `httpOnly` still travel in plaintext over HTTP, and so does the password on its way to `/api/login`/`/api/register`. Fine for localhost, not fine once this leaves your machine.
+- `.env` holds your Supabase service role key — it bypasses row-level security entirely and is already gitignored, but double-check it never gets committed or logged.
 
 ## Branch workflow
 
