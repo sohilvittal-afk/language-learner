@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Profile</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app-nav"></div>
+  <div class="page-wrap">
+    <div class="page-header">
+      <h1>Profile</h1>
+      <p>Your account details and learning preferences.</p>
+    </div>
+
+    <section class="panel">
+      <h2>Account</h2>
+      <div class="profile-facts" id="profileFacts">
+        <p class="muted">Loading...</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Translation language</h2>
+      <p class="muted">Every word in the Word Bank (and on your flashcards) is translated into this language for you.</p>
+      <form id="languageForm" class="profile-language-form">
+        <label for="preferredLanguage">Translate words into</label>
+        <select id="preferredLanguage"></select>
+        <button type="submit">Save</button>
+      </form>
+      <p class="message" id="languageMsg"></p>
+    </section>
+  </div>
+
+  <script src="nav.js"></script>
+  <script>
+    const ROLE_LABELS = { user: 'User', admin: 'Admin', super_admin: 'Super Admin' };
+
+    function labelForLanguage(lang) {
+      return lang.charAt(0).toUpperCase() + lang.slice(1);
+    }
+
+    function fact(label, value) {
+      const row = document.createElement('p');
+      const strong = document.createElement('strong');
+      strong.textContent = `${label}: `;
+      row.appendChild(strong);
+      row.appendChild(document.createTextNode(value));
+      return row;
+    }
+
+    (async () => {
+      renderNav('profile');
+
+      const [profileRes, languagesRes] = await Promise.all([
+        fetch('/api/profile'),
+        fetch('/api/languages')
+      ]);
+
+      const facts = document.getElementById('profileFacts');
+      const msg = document.getElementById('languageMsg');
+
+      if (!profileRes.ok || !languagesRes.ok) {
+        facts.innerHTML = '';
+        facts.appendChild(fact('Error', 'Could not load your profile.'));
+        return;
+      }
+
+      const { profile } = await profileRes.json();
+      const { languages } = await languagesRes.json();
+
+      facts.innerHTML = '';
+      facts.appendChild(fact('Username', profile.username));
+      facts.appendChild(fact('Email', profile.email));
+      facts.appendChild(fact('Role', ROLE_LABELS[profile.role] || profile.role));
+
+      const select = document.getElementById('preferredLanguage');
+      languages.forEach((lang) => {
+        const opt = document.createElement('option');
+        opt.value = lang;
+        opt.textContent = labelForLanguage(lang);
+        if (lang === profile.preferred_language) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      document.getElementById('languageForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        msg.textContent = '';
+
+        const res = await fetch('/api/profile', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preferred_language: select.value })
+        });
+        const data = await res.json();
+
+        msg.style.color = res.ok ? 'var(--success)' : 'var(--error)';
+        msg.textContent = res.ok
+          ? `Saved — words will now be translated into ${labelForLanguage(data.profile.preferred_language)}.`
+          : (data.error || 'Could not save your language.');
+      });
+    })();
+  </script>
+</body>
+</html>

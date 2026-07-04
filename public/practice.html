@@ -23,6 +23,17 @@
     let queue = [];
     let index = 0;
     let flipped = false;
+    let translationLanguage = null;
+
+    function labelForLanguage(lang) {
+      return lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : '';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
 
     function renderCard() {
       const shell = document.getElementById('practiceShell');
@@ -49,6 +60,9 @@
               <div class="flashcard-hint">Tap to reveal the definition</div>
             </div>
             <div class="flashcard-face flashcard-back">
+              ${word.translation && word.language !== translationLanguage
+                ? `<div class="flashcard-translation">${escapeHtml(labelForLanguage(translationLanguage))}: ${escapeHtml(word.translation)}</div>`
+                : ''}
               <div class="flashcard-definition">${word.definition}</div>
               ${word.example_sentence ? `<div class="flashcard-example">“${word.example_sentence}”</div>` : ''}
             </div>
@@ -95,6 +109,7 @@
       }
       const data = await res.json();
       queue = data.words || [];
+      translationLanguage = data.translation_language || null;
       if (queue.length === 0) {
         shell.innerHTML = `
           <div class="practice-empty">

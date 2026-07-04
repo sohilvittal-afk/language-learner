@@ -23,6 +23,10 @@ create table if not exists public.profiles (
   display_name text,
   status text not null default 'active' check (status in ('active', 'disabled')),
   notes text,
+  -- Which language this learner wants word-bank words translated into —
+  -- self-set on the Profile page (see PATCH /api/profile), unlike the
+  -- admin-managed fields above. List lives in lib/translation.js.
+  preferred_language text not null default 'english',
   created_at timestamptz not null default now()
 );
 

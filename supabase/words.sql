@@ -12,12 +12,16 @@ create table if not exists public.words (
   example_sentence text,
   part_of_speech text,
   difficulty text not null default 'medium' check (difficulty in ('easy', 'medium', 'hard')),
+  -- Which language the term is written in ('english', 'dutch', 'german', ...).
+  -- The canonical list lives in lib/translation.js and is validated in Express.
+  language text not null default 'english',
   created_by uuid references public.users(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
--- Case-insensitive uniqueness so "Serendipity" and "serendipity" aren't both addable.
-create unique index if not exists words_term_lower_idx on public.words (lower(term));
+-- Case-insensitive uniqueness per language, so "Serendipity" and "serendipity"
+-- aren't both addable but "hotel" can exist in both English and Dutch.
+create unique index if not exists words_term_language_idx on public.words (lower(term), language);
 
 alter table public.words enable row level security;
 
