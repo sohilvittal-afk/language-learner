@@ -89,7 +89,7 @@ app.get('/api/me', (req, res) => {
 
 // --- protected page ---------------------------------------------------
 app.get('/dashboard.html', requireAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+  res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
 
 app.listen(PORT, () => {
