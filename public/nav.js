@@ -76,6 +76,10 @@ function renderNav(activePage) {
             <button type="button" class="topnav-link topnav-avatar">${(data.username || '?').slice(0, 1).toUpperCase()}</button>
             <div class="topnav-dropdown topnav-dropdown-right">
               <div class="topnav-dropdown-account">Signed in as <strong>${data.username}</strong></div>
+              <a href="/profile.html" class="topnav-dropdown-link${activePage === 'profile' ? ' active' : ''}">
+                <span class="topnav-dropdown-title">Profile</span>
+                <span class="topnav-dropdown-desc">Account & translation language</span>
+              </a>
               <button type="button" id="navLogoutBtn" class="topnav-dropdown-link topnav-dropdown-logout">Log out</button>
             </div>
           </div>

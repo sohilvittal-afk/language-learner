@@ -15,6 +15,12 @@ const {
   attachWordIds,
   stripQuizAnswers
 } = require('./lib/learning');
+const {
+  SUPPORTED_LANGUAGES,
+  DEFAULT_LANGUAGE,
+  isSupportedLanguage,
+  attachTranslations
+} = require('./lib/translation');
 
 const VALID_ROLES = ['user', 'admin', 'super_admin'];
 const BCRYPT_ROUNDS = 12;
@@ -115,6 +121,9 @@ function requireRole(minRole) {
 // a static handler for /public would otherwise serve this file to anyone.
 app.get('/dashboard.html', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+app.get('/profile.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'profile.html'));
 });
 app.get('/words.html', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'words.html'));
@@ -433,6 +442,75 @@ app.delete('/api/education/:id', requireRole('super_admin'), async (req, res) =>
   res.json({ ok: true });
 });
 
+// --- own profile -----------------------------------------------------------
+// Unlike /api/users (admins editing OTHER people), these routes let any
+// logged-in user read and update their own learning settings — currently just
+// preferred_language, the language the word bank gets translated into.
+
+// The language everything gets translated into for this user. Falls back to
+// the default if the profile row is missing or predates the language column.
+async function getPreferredLanguage(supabase, userId) {
+  try {
+    const { data } = await supabase
+      .from('profiles')
+      .select('preferred_language')
+      .eq('id', userId)
+      .maybeSingle();
+    if (data && isSupportedLanguage(data.preferred_language)) return data.preferred_language;
+  } catch (err) {
+    console.warn('Could not read preferred language:', err.message);
+  }
+  return DEFAULT_LANGUAGE;
+}
+
+// The one list of languages the UI can offer — used by the Profile page's
+// selector and the admin add-word form.
+app.get('/api/languages', requireRole('user'), (req, res) => {
+  res.json({ languages: SUPPORTED_LANGUAGES, default: DEFAULT_LANGUAGE });
+});
+
+app.get('/api/profile', requireRole('user'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const preferredLanguage = await getPreferredLanguage(supabase, req.session.userId);
+  res.json({
+    profile: {
+      username: req.session.username,
+      email: req.session.email,
+      role: req.session.role || 'user',
+      preferred_language: preferredLanguage
+    }
+  });
+});
+
+app.patch('/api/profile', requireRole('user'), async (req, res) => {
+  const { preferred_language } = req.body;
+  if (!isSupportedLanguage(preferred_language)) {
+    return res.status(400).json({ error: 'Pick one of the supported languages.' });
+  }
+
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .upsert({ id: req.session.userId, preferred_language }, { onConflict: 'id' })
+    .select('preferred_language')
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ profile: { preferred_language: data ? data.preferred_language : preferred_language } });
+});
+
 // --- word bank -----------------------------------------------------------
 // The shared vocabulary every learner draws from — for flashcard review and
 // for Side Quest stories. Any logged-in user can browse it; only admins and
@@ -447,20 +525,29 @@ app.get('/api/words', requireRole('user'), async (req, res) => {
 
   const { data, error } = await supabase
     .from('words')
-    .select('id, term, definition, example_sentence, part_of_speech, difficulty, created_at')
+    .select('id, term, definition, example_sentence, part_of_speech, difficulty, language, created_at')
     .order('created_at', { ascending: false });
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ words: data || [] });
+
+  // Each learner sees the bank translated into their own preferred language
+  // (set on the Profile page). Translations are cached, so only words never
+  // requested in this language before cost a Kimi call.
+  const preferredLanguage = await getPreferredLanguage(supabase, req.session.userId);
+  const words = await attachTranslations(supabase, data || [], preferredLanguage);
+  res.json({ words, translation_language: preferredLanguage });
 });
 
 app.post('/api/words', requireRole('admin'), async (req, res) => {
-  const { term, definition, example_sentence, part_of_speech, difficulty } = req.body;
+  const { term, definition, example_sentence, part_of_speech, difficulty, language } = req.body;
   if (!term || !term.trim() || !definition || !definition.trim()) {
     return res.status(400).json({ error: 'Term and definition are required.' });
   }
   if (difficulty && !['easy', 'medium', 'hard'].includes(difficulty)) {
     return res.status(400).json({ error: 'Difficulty must be easy, medium, or hard.' });
+  }
+  if (language && !isSupportedLanguage(language)) {
+    return res.status(400).json({ error: 'Pick one of the supported languages.' });
   }
 
   let supabase;
@@ -478,13 +565,14 @@ app.post('/api/words', requireRole('admin'), async (req, res) => {
       example_sentence: example_sentence && example_sentence.trim() ? example_sentence.trim() : null,
       part_of_speech: part_of_speech && part_of_speech.trim() ? part_of_speech.trim() : null,
       difficulty: difficulty || 'medium',
+      language: language || DEFAULT_LANGUAGE,
       created_by: req.session.userId
     })
-    .select('id, term, definition, example_sentence, part_of_speech, difficulty, created_at')
+    .select('id, term, definition, example_sentence, part_of_speech, difficulty, language, created_at')
     .single();
 
   if (error) {
-    if (error.code === '23505') return res.status(400).json({ error: 'That word is already in the bank.' });
+    if (error.code === '23505') return res.status(400).json({ error: 'That word is already in the bank for that language.' });
     return res.status(500).json({ error: error.message });
   }
   res.json({ word: data });
@@ -518,7 +606,11 @@ app.get('/api/practice/next', requireRole('user'), async (req, res) => {
 
   try {
     const words = await pickWordsForUser(supabase, req.session.userId, 10);
-    res.json({ words });
+    const preferredLanguage = await getPreferredLanguage(supabase, req.session.userId);
+    res.json({
+      words: await attachTranslations(supabase, words, preferredLanguage),
+      translation_language: preferredLanguage
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

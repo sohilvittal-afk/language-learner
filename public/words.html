@@ -10,7 +10,8 @@
   <div class="page-wrap">
     <div class="page-header">
       <h1>Word Bank</h1>
-      <p>Every word on the platform lives here. Practice and Side Quests both draw from this list.</p>
+      <p>Every word on the platform lives here. Practice and Side Quests both draw from this list.
+        Each word is shown with its translation into your preferred language — change it on your <a href="/profile.html">Profile</a>.</p>
     </div>
 
     <section class="panel" id="addWordPanel" hidden>
@@ -19,6 +20,10 @@
         <div>
           <label for="wordTerm">Term</label>
           <input id="wordTerm" required maxlength="80">
+        </div>
+        <div>
+          <label for="wordLanguage">Language of this word</label>
+          <select id="wordLanguage"></select>
         </div>
         <div>
           <label for="wordPos">Part of speech</label>
@@ -53,6 +58,11 @@
   <script>
     // ROLE_HIERARCHY is declared globally by nav.js (loaded above) — reused here.
     let canManage = false;
+    let translationLanguage = null;
+
+    function labelForLanguage(lang) {
+      return lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : '';
+    }
 
     function wordCard(word) {
       const card = document.createElement('div');
@@ -63,10 +73,26 @@
       chip.textContent = word.difficulty;
       card.appendChild(chip);
 
+      if (word.language) {
+        const lang = document.createElement('span');
+        lang.className = 'lang-chip';
+        lang.textContent = labelForLanguage(word.language);
+        card.appendChild(lang);
+      }
+
       const term = document.createElement('p');
       term.className = 'term';
       term.textContent = word.term;
       card.appendChild(term);
+
+      // The word rendered in this learner's preferred language (skipped when
+      // the word is already in that language).
+      if (word.translation && word.language !== translationLanguage) {
+        const translation = document.createElement('p');
+        translation.className = 'translation';
+        translation.textContent = `${labelForLanguage(translationLanguage)}: ${word.translation}`;
+        card.appendChild(translation);
+      }
 
       if (word.part_of_speech) {
         const pos = document.createElement('span');
@@ -112,7 +138,8 @@
         msg.textContent = errData.error || 'Could not load the word bank.';
         return;
       }
-      const { words } = await res.json();
+      const { words, translation_language } = await res.json();
+      translationLanguage = translation_language || null;
       msg.textContent = '';
       grid.innerHTML = '';
       if (words.length === 0) {
@@ -129,6 +156,7 @@
 
       const body = {
         term: document.getElementById('wordTerm').value,
+        language: document.getElementById('wordLanguage').value,
         part_of_speech: document.getElementById('wordPos').value,
         definition: document.getElementById('wordDefinition').value,
         example_sentence: document.getElementById('wordExample').value,
@@ -152,12 +180,29 @@
       }
     });
 
+    async function loadLanguageOptions() {
+      const select = document.getElementById('wordLanguage');
+      const res = await fetch('/api/languages');
+      if (!res.ok) return;
+      const data = await res.json();
+      select.innerHTML = '';
+      data.languages.forEach((lang) => {
+        const opt = document.createElement('option');
+        opt.value = lang;
+        opt.textContent = labelForLanguage(lang);
+        // defaultSelected too, so form.reset() after adding a word returns here.
+        if (lang === data.default) opt.selected = opt.defaultSelected = true;
+        select.appendChild(opt);
+      });
+    }
+
     (async () => {
       const me = await renderNav('words');
       if (me.loggedIn) {
         const role = ROLE_HIERARCHY.includes(me.role) ? me.role : 'user';
         canManage = ROLE_HIERARCHY.indexOf(role) >= ROLE_HIERARCHY.indexOf('admin');
         document.getElementById('addWordPanel').hidden = !canManage;
+        if (canManage) loadLanguageOptions();
       }
       loadWords();
     })();
