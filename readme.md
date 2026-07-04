@@ -1,5 +1,16 @@
 # Local Login App
 
+## Set up Supabase
+
+1. Create a project at [supabase.com](https://supabase.com) (or use an existing one).
+2. Email/password auth is on by default — nothing to enable in the dashboard.
+3. Copy the project URL and `anon` public key from **Settings → API**.
+4. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+
+By default Supabase requires users to confirm their email before they can log in
+(**Authentication → Providers → Email → Confirm email**). Turn that off in the
+dashboard if you want to log in immediately after registering during local dev.
+
 ## Run it
 
 ```
@@ -11,17 +22,20 @@ Then open http://localhost:4000 (redirects to the login page)
 
 ## What's actually happening
 
-- Passwords are hashed with bcrypt (12 rounds) before they ever touch disk — `users.json` never stores plaintext.
+- Registration and login go straight to Supabase Auth (`supabase.auth.signUp` /
+  `signInWithPassword`) — this app never stores an email or password itself.
+  Supabase hashes and stores credentials on its end; our server only ever holds
+  a session pointer (the user's id) and a Supabase user id.
 - Sessions are server-side (`express-session`), tied to an httpOnly cookie your JS can't read or steal via XSS.
 - `/dashboard.html` is protected server-side by middleware, not by hiding a link — you can't get in by guessing the URL.
-- Login and "user doesn't exist" return the identical error, so an attacker can't enumerate valid usernames.
+- Login and "user doesn't exist" return the identical error, so an attacker can't enumerate valid emails.
 
 ## Known gaps you should close before this touches the internet
 
-- The session secret in `server.js` is a placeholder. Replace it and load it from an environment variable.
-- No rate limiting on `/api/login` — add something like `express-rate-limit` or an attacker can brute-force passwords all day.
-- `users.json` is fine for local dev, not for concurrent writes at any real scale — swap to SQLite/Postgres before this is anything but a toy.
+- The session secret in `server.js` falls back to a placeholder if `SESSION_SECRET` isn't set — always set it via `.env` outside local dev.
+- No rate limiting on `/api/login` — add something like `express-rate-limit` or an attacker can brute-force passwords all day (Supabase applies some limits of its own, but don't rely on that alone).
 - No HTTPS here — cookies marked `httpOnly` still travel in plaintext over HTTP. Fine for localhost, not fine once this leaves your machine.
+- `.env` holds your Supabase keys — it's already gitignored, but double-check it never gets committed.
 
 ## Branch workflow
 

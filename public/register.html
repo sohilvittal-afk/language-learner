@@ -11,8 +11,8 @@
     <p class="subtitle">Password must be at least 8 characters.</p>
     <div class="message" id="msg"></div>
     <form id="registerForm">
-      <label for="username">Username</label>
-      <input id="username" name="username" autocomplete="username" required>
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" required>
 
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8">
@@ -29,18 +29,21 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       msg.textContent = '';
-      const username = document.getElementById('username').value;
+      const email = document.getElementById('email').value;
       const password = document.getElementById('password').value;
 
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ email, password })
       });
       const data = await res.json();
 
       if (res.ok) {
-        window.location.href = '/login.html';
+        msg.textContent = data.needsConfirmation
+          ? 'Check your email to confirm your account, then log in.'
+          : 'Account created — you can log in now.';
+        setTimeout(() => { window.location.href = '/login.html'; }, 1500);
       } else {
         msg.textContent = data.error || 'Something went wrong.';
       }
