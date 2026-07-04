@@ -25,6 +25,8 @@ jobs:
         run: npm install
 
       - name: Boot the server and check it responds
+        env:
+          PORT: 3000
         run: |
           node server.js &
           SERVER_PID=$!
