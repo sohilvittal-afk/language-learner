@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Word Bank</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app-nav"></div>
+  <div class="page-wrap">
+    <div class="page-header">
+      <h1>Word Bank</h1>
+      <p>Every word on the platform lives here. Practice and Side Quests both draw from this list.</p>
+    </div>
+
+    <section class="panel" id="addWordPanel" hidden>
+      <h2>Add a word</h2>
+      <form id="addWordForm" class="add-word-form">
+        <div>
+          <label for="wordTerm">Term</label>
+          <input id="wordTerm" required maxlength="80">
+        </div>
+        <div>
+          <label for="wordPos">Part of speech</label>
+          <input id="wordPos" placeholder="e.g. noun, verb" maxlength="40">
+        </div>
+        <div class="full">
+          <label for="wordDefinition">Definition</label>
+          <textarea id="wordDefinition" rows="2" required></textarea>
+        </div>
+        <div class="full">
+          <label for="wordExample">Example sentence (optional)</label>
+          <textarea id="wordExample" rows="2"></textarea>
+        </div>
+        <div>
+          <label for="wordDifficulty">Difficulty</label>
+          <select id="wordDifficulty">
+            <option value="easy">Easy</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
+        <button type="submit">Add word</button>
+      </form>
+      <p class="message" id="addWordMsg"></p>
+    </section>
+
+    <p class="message" id="wordsMsg"></p>
+    <div class="word-grid" id="wordGrid"></div>
+  </div>
+
+  <script src="nav.js"></script>
+  <script>
+    // ROLE_HIERARCHY is declared globally by nav.js (loaded above) — reused here.
+    let canManage = false;
+
+    function wordCard(word) {
+      const card = document.createElement('div');
+      card.className = 'word-card';
+
+      const chip = document.createElement('span');
+      chip.className = `difficulty-chip ${word.difficulty}`;
+      chip.textContent = word.difficulty;
+      card.appendChild(chip);
+
+      const term = document.createElement('p');
+      term.className = 'term';
+      term.textContent = word.term;
+      card.appendChild(term);
+
+      if (word.part_of_speech) {
+        const pos = document.createElement('span');
+        pos.className = 'pos';
+        pos.textContent = word.part_of_speech;
+        card.appendChild(pos);
+      }
+
+      const definition = document.createElement('p');
+      definition.className = 'definition';
+      definition.textContent = word.definition;
+      card.appendChild(definition);
+
+      if (word.example_sentence) {
+        const example = document.createElement('p');
+        example.className = 'example';
+        example.textContent = `“${word.example_sentence}”`;
+        card.appendChild(example);
+      }
+
+      if (canManage) {
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn-danger delete-btn';
+        delBtn.textContent = 'Remove';
+        delBtn.addEventListener('click', async () => {
+          if (!confirm(`Remove "${word.term}" from the word bank?`)) return;
+          const res = await fetch(`/api/words/${word.id}`, { method: 'DELETE' });
+          if (res.ok) loadWords();
+        });
+        card.appendChild(delBtn);
+      }
+
+      return card;
+    }
+
+    async function loadWords() {
+      const grid = document.getElementById('wordGrid');
+      const msg = document.getElementById('wordsMsg');
+      const res = await fetch('/api/words');
+      if (!res.ok) {
+        msg.textContent = 'Could not load the word bank.';
+        return;
+      }
+      const { words } = await res.json();
+      msg.textContent = '';
+      grid.innerHTML = '';
+      if (words.length === 0) {
+        grid.innerHTML = '<p class="muted">No words yet.</p>';
+        return;
+      }
+      words.forEach((w) => grid.appendChild(wordCard(w)));
+    }
+
+    document.getElementById('addWordForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const msg = document.getElementById('addWordMsg');
+      msg.textContent = '';
+
+      const body = {
+        term: document.getElementById('wordTerm').value,
+        part_of_speech: document.getElementById('wordPos').value,
+        definition: document.getElementById('wordDefinition').value,
+        example_sentence: document.getElementById('wordExample').value,
+        difficulty: document.getElementById('wordDifficulty').value
+      };
+
+      const res = await fetch('/api/words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+
+      msg.style.color = res.ok ? 'var(--success)' : 'var(--error)';
+      msg.textContent = res.ok ? `Added "${data.word.term}".` : (data.error || 'Could not add word.');
+
+      if (res.ok) {
+        event.target.reset();
+        document.getElementById('wordDifficulty').value = 'medium';
+        loadWords();
+      }
+    });
+
+    (async () => {
+      const me = await renderNav('words');
+      if (me.loggedIn) {
+        const role = ROLE_HIERARCHY.includes(me.role) ? me.role : 'user';
+        canManage = ROLE_HIERARCHY.indexOf(role) >= ROLE_HIERARCHY.indexOf('admin');
+        document.getElementById('addWordPanel').hidden = !canManage;
+      }
+      loadWords();
+    })();
+  </script>
+</body>
+</html>

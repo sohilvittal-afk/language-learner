@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Practice</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app-nav"></div>
+  <div class="page-wrap">
+    <div class="page-header">
+      <h1>Practice</h1>
+      <p>Flashcards pull the words you're due to review — the ones you've struggled with come back sooner.</p>
+    </div>
+
+    <div class="practice-shell" id="practiceShell">
+      <p class="spinner-text">Loading your review queue...</p>
+    </div>
+  </div>
+
+  <script src="nav.js"></script>
+  <script>
+    let queue = [];
+    let index = 0;
+    let flipped = false;
+
+    function renderCard() {
+      const shell = document.getElementById('practiceShell');
+      if (index >= queue.length) {
+        shell.innerHTML = `
+          <div class="practice-empty">
+            <h2>Nothing left to review right now 🎉</h2>
+            <p>Come back later, add more words to the bank, or try a <a href="/side-quests.html">Side Quest</a> instead.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const word = queue[index];
+      flipped = false;
+
+      shell.innerHTML = `
+        <p class="practice-progress">Card ${index + 1} of ${queue.length}</p>
+        <div class="flashcard" id="flashcard">
+          <div class="flashcard-inner">
+            <div class="flashcard-face flashcard-front">
+              <div class="flashcard-term">${word.term}</div>
+              ${word.part_of_speech ? `<div class="flashcard-pos">${word.part_of_speech}</div>` : ''}
+              <div class="flashcard-hint">Tap to reveal the definition</div>
+            </div>
+            <div class="flashcard-face flashcard-back">
+              <div class="flashcard-definition">${word.definition}</div>
+              ${word.example_sentence ? `<div class="flashcard-example">“${word.example_sentence}”</div>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="practice-actions" id="practiceActions" hidden>
+          <button type="button" class="btn-incorrect" id="btnIncorrect">Didn't know it</button>
+          <button type="button" class="btn-correct" id="btnCorrect">Knew it</button>
+        </div>
+      `;
+
+      const card = document.getElementById('flashcard');
+      const actions = document.getElementById('practiceActions');
+      card.addEventListener('click', () => {
+        flipped = !flipped;
+        card.classList.toggle('flipped', flipped);
+        if (flipped) actions.hidden = false;
+      });
+
+      document.getElementById('btnCorrect').addEventListener('click', (e) => { e.stopPropagation(); answer(word, true); });
+      document.getElementById('btnIncorrect').addEventListener('click', (e) => { e.stopPropagation(); answer(word, false); });
+    }
+
+    async function answer(word, correct) {
+      await fetch('/api/practice/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word_id: word.id, correct })
+      });
+      index += 1;
+      renderCard();
+    }
+
+    (async () => {
+      renderNav('practice');
+      const res = await fetch('/api/practice/next');
+      const shell = document.getElementById('practiceShell');
+      if (!res.ok) {
+        shell.innerHTML = '<p class="message">Could not load your practice queue.</p>';
+        return;
+      }
+      const data = await res.json();
+      queue = data.words || [];
+      if (queue.length === 0) {
+        shell.innerHTML = `
+          <div class="practice-empty">
+            <h2>The word bank is empty</h2>
+            <p>Ask an admin to add words, then come back to practice.</p>
+          </div>
+        `;
+        return;
+      }
+      renderCard();
+    })();
+  </script>
+</body>
+</html>

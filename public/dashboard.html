@@ -6,7 +6,9 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="card dashboard">
+  <div id="app-nav"></div>
+  <div class="page-wrap">
+  <div class="dashboard">
     <div class="dashboard-header">
       <div>
         <h1>You're in.</h1>
@@ -63,12 +65,12 @@
       </div>
       <p class="message" id="usersMsg"></p>
     </section>
-
-    <button id="logoutBtn">Log out</button>
+  </div>
   </div>
 
+  <script src="nav.js"></script>
   <script>
-    const ROLE_HIERARCHY = ['user', 'admin', 'super_admin'];
+    // ROLE_HIERARCHY is declared globally by nav.js (loaded above) — reused here.
     const ROLE_LABELS = { user: 'User', admin: 'Admin', super_admin: 'Super Admin' };
 
     async function loadUsers(role, currentUserId) {
@@ -266,6 +268,7 @@
     });
 
     (async () => {
+      renderNav('dashboard');
       const res = await fetch('/api/me');
       const data = await res.json();
 
@@ -295,11 +298,6 @@
 
       loadEducation(role === 'super_admin');
     })();
-
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-      await fetch('/api/logout', { method: 'POST' });
-      window.location.href = '/login.html';
-    });
   </script>
 </body>
 </html>
