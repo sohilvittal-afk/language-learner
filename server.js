@@ -4,7 +4,37 @@ const express = require('express');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
-const { getSupabaseClient } = require('./lib/supabaseClient');
+const { getSupabaseClient, getSupabaseClientForToken } = require('./lib/supabaseClient');
+
+const VALID_ROLES = ['user', 'admin', 'super_admin'];
+
+// Looks up this user's role in the `profiles` table (see supabase/profiles.sql),
+// creating a default 'user' row on first login. Promotions to admin/super_admin
+// happen manually in Supabase, never through this app.
+async function resolveRole(userClient, user) {
+  try {
+    const { data: existing } = await userClient
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (existing && VALID_ROLES.includes(existing.role)) return existing.role;
+
+    const { data: inserted } = await userClient
+      .from('profiles')
+      .insert({ id: user.id, email: user.email, role: 'user' })
+      .select('role')
+      .maybeSingle();
+
+    return inserted && VALID_ROLES.includes(inserted.role) ? inserted.role : 'user';
+  } catch (err) {
+    // profiles table not set up yet, or a transient Supabase error — fall back
+    // rather than blocking login over a non-critical lookup.
+    console.warn('Could not resolve role from profiles table:', err.message);
+    return 'user';
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -12,7 +42,6 @@ const PORT = process.env.PORT || 4000;
 // --- middleware --------------------------------------------------------
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
 
 // Keyed per-IP: 5 login attempts / 15 min blocks brute-forcing, 10 signups / hour blocks spam accounts.
 const loginLimiter = rateLimit({
@@ -45,6 +74,14 @@ function requireAuth(req, res, next) {
   if (req.session && req.session.userId) return next();
   return res.redirect('/login.html');
 }
+
+// Registered before express.static so the auth check below actually runs —
+// a static handler for /public would otherwise serve this file to anyone.
+app.get('/dashboard.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // --- auth routes ---------------------------------------------------
 // User + password never touch our own storage — Supabase Auth owns both.
@@ -96,6 +133,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
 
   req.session.userId = data.user.id;
   req.session.email = data.user.email;
+  req.session.role = await resolveRole(getSupabaseClientForToken(data.session.access_token), data.user);
   res.json({ ok: true });
 });
 
@@ -107,18 +145,13 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/me', (req, res) => {
   if (req.session && req.session.userId) {
-    return res.json({ loggedIn: true, email: req.session.email });
+    return res.json({ loggedIn: true, email: req.session.email, role: req.session.role || 'user' });
   }
   res.json({ loggedIn: false });
 });
 
 app.get('/', (req, res) => {
   res.redirect('/login.html');
-});
-
-// --- protected page ---------------------------------------------------
-app.get('/dashboard.html', requireAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
 
 app.listen(PORT, () => {

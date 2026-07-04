@@ -6,19 +6,57 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="card">
-    <h1>You're in.</h1>
-    <p class="subtitle" id="welcome">Loading session...</p>
+  <div class="card dashboard">
+    <div class="dashboard-header">
+      <div>
+        <h1>You're in.</h1>
+        <p class="subtitle" id="welcome">Loading session...</p>
+      </div>
+      <span class="role-badge" id="roleBadge" hidden></span>
+    </div>
+
+    <section class="panel" data-min-role="user">
+      <h2>My Lessons</h2>
+      <p class="muted">Practice vocabulary, review flashcards, and track your own progress.</p>
+    </section>
+
+    <section class="panel" data-min-role="admin" hidden>
+      <h2>Admin Panel</h2>
+      <p class="muted">Manage lesson content and vocabulary lists, and view learner activity across accounts.</p>
+    </section>
+
+    <section class="panel" data-min-role="super_admin" hidden>
+      <h2>Super Admin Panel</h2>
+      <p class="muted">Manage admin accounts and review system-wide settings. Roles are promoted directly in Supabase — see <code>supabase/profiles.sql</code>.</p>
+    </section>
+
     <button id="logoutBtn">Log out</button>
   </div>
 
   <script>
+    const ROLE_HIERARCHY = ['user', 'admin', 'super_admin'];
+    const ROLE_LABELS = { user: 'User', admin: 'Admin', super_admin: 'Super Admin' };
+
     (async () => {
       const res = await fetch('/api/me');
       const data = await res.json();
+
       document.getElementById('welcome').textContent = data.loggedIn
         ? `Logged in as ${data.email}`
         : 'Not logged in.';
+
+      if (!data.loggedIn) return;
+
+      const role = ROLE_HIERARCHY.includes(data.role) ? data.role : 'user';
+      const roleBadge = document.getElementById('roleBadge');
+      roleBadge.textContent = ROLE_LABELS[role];
+      roleBadge.hidden = false;
+
+      const roleRank = ROLE_HIERARCHY.indexOf(role);
+      document.querySelectorAll('.panel[data-min-role]').forEach((panel) => {
+        const minRank = ROLE_HIERARCHY.indexOf(panel.dataset.minRole);
+        panel.hidden = roleRank < minRank;
+      });
     })();
 
     document.getElementById('logoutBtn').addEventListener('click', async () => {

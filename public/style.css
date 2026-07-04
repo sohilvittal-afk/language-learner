@@ -96,3 +96,52 @@
   
   .footer-link a { color: var(--accent); text-decoration: none; }
   .footer-link a:hover { text-decoration: underline; }
+
+  .dashboard {
+    max-width: 480px;
+  }
+
+  .dashboard-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .role-badge {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    background: rgba(91, 140, 255, 0.15);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .panel {
+    background: #0d0f15;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .panel h2 {
+    font-size: 1rem;
+    margin: 0 0 8px;
+  }
+
+  .panel .muted {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0;
+  }
+
+  .panel code {
+    background: var(--panel);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.8em;
+  }
