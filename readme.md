@@ -29,11 +29,12 @@ Then open http://localhost:4000 (redirects to the login page)
 - Sessions are server-side (`express-session`), tied to an httpOnly cookie your JS can't read or steal via XSS.
 - `/dashboard.html` is protected server-side by middleware, not by hiding a link — you can't get in by guessing the URL.
 - Login and "user doesn't exist" return the identical error, so an attacker can't enumerate valid emails.
+- `/api/login` and `/api/register` are rate-limited per IP (`express-rate-limit`) — 5 login attempts per 15 minutes, 10 signups per hour — so brute-forcing or spamming accounts gets a `429` instead of unlimited tries.
 
 ## Known gaps you should close before this touches the internet
 
 - The session secret in `server.js` falls back to a placeholder if `SESSION_SECRET` isn't set — always set it via `.env` outside local dev.
-- No rate limiting on `/api/login` — add something like `express-rate-limit` or an attacker can brute-force passwords all day (Supabase applies some limits of its own, but don't rely on that alone).
+- The rate limiter keys on IP address, which is easy to work around with rotating IPs/proxies — fine as a first line of defense, not a substitute for Supabase's own abuse protections.
 - No HTTPS here — cookies marked `httpOnly` still travel in plaintext over HTTP. Fine for localhost, not fine once this leaves your machine.
 - `.env` holds your Supabase keys — it's already gitignored, but double-check it never gets committed.
 
