@@ -87,7 +87,10 @@
       const res = await fetch('/api/practice/next');
       const shell = document.getElementById('practiceShell');
       if (!res.ok) {
-        shell.innerHTML = '<p class="message">Could not load your practice queue.</p>';
+        const errData = await res.json().catch(() => ({}));
+        shell.innerHTML = '<p class="message"></p>';
+        shell.querySelector('.message').textContent =
+          errData.error || 'Could not load your practice queue.';
         return;
       }
       const data = await res.json();
