@@ -98,7 +98,7 @@
   .footer-link a:hover { text-decoration: underline; }
 
   .dashboard {
-    max-width: 480px;
+    max-width: 720px;
   }
 
   .dashboard-header {
@@ -136,7 +136,7 @@
   .panel .muted {
     color: var(--muted);
     font-size: 0.85rem;
-    margin: 0;
+    margin: 0 0 12px;
   }
 
   .panel code {
@@ -145,3 +145,48 @@
     border-radius: 4px;
     font-size: 0.8em;
   }
+
+  .table-wrap {
+    overflow-x: auto;
+    margin-bottom: 8px;
+  }
+
+  #usersTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  #usersTable th,
+  #usersTable td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  #usersTable th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+  }
+
+  #usersTable input,
+  #usersTable select {
+    width: 100%;
+    min-width: 90px;
+    padding: 4px 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+
+  #usersTable button {
+    width: auto;
+    padding: 4px 12px;
+    font-size: 0.8rem;
+  }
+

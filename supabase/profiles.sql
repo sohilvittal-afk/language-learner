@@ -1,25 +1,32 @@
--- Run this once in the Supabase SQL Editor (Project > SQL Editor > New query).
+-- Run this once in the Supabase SQL Editor, AFTER supabase/users.sql
+-- (id below references public.users, not auth.users).
 --
--- Stores each user's role. Rows are created automatically (defaulting to
--- 'user') the first time someone logs in — see resolveRole() in server.js.
--- Promoting someone to 'admin' or 'super_admin' is a manual, out-of-band step:
--- open Table Editor > profiles and edit the role column for that row. There is
--- intentionally no update policy below, so no logged-in user — including
--- admins — can grant themselves or anyone else a higher role through the app.
+-- BREAKING CHANGE from an earlier version of this file: this app no longer
+-- uses Supabase Auth, so a profiles table built against auth.users no longer
+-- applies. If you ran the old version, drop it first — its ids won't match
+-- anything in the new public.users table and old accounts must re-register:
+--   drop table if exists public.profiles;
+--
+-- Stores role plus a few admin-editable fields, linked 1:1 to public.users.
+-- A row is created automatically (role 'user', status 'active') at
+-- registration, with a lazy-create fallback on login — see server.js.
+--
+-- Role changes never go through RLS — there is intentionally no update
+-- policy (see below), so the only way to change role/display_name/status/notes
+-- is through this app's PATCH /api/users/:id route, which runs server-side
+-- with the service role key after its own requireRole checks, or manually in
+-- Supabase Table Editor.
 
 create table if not exists public.profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  email text not null,
+  id uuid primary key references public.users(id) on delete cascade,
   role text not null default 'user' check (role in ('user', 'admin', 'super_admin')),
+  display_name text,
+  status text not null default 'active' check (status in ('active', 'disabled')),
+  notes text,
   created_at timestamptz not null default now()
 );
 
 alter table public.profiles enable row level security;
 
-create policy "profiles_select_own"
-  on public.profiles for select
-  using (auth.uid() = id);
-
-create policy "profiles_insert_own"
-  on public.profiles for insert
-  with check (auth.uid() = id and role = 'user');
+-- No policies, intentionally: same reasoning as users.sql — no Supabase Auth
+-- session exists, so this table is only ever touched via the service role key.

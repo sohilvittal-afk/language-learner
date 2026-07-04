@@ -21,13 +21,24 @@
     </section>
 
     <section class="panel" data-min-role="admin" hidden>
-      <h2>Admin Panel</h2>
-      <p class="muted">Manage lesson content and vocabulary lists, and view learner activity across accounts.</p>
-    </section>
-
-    <section class="panel" data-min-role="super_admin" hidden>
-      <h2>Super Admin Panel</h2>
-      <p class="muted">Manage admin accounts and review system-wide settings. Roles are promoted directly in Supabase — see <code>supabase/profiles.sql</code>.</p>
+      <h2>User Management</h2>
+      <p class="muted" id="userMgmtNote"></p>
+      <div class="table-wrap">
+        <table id="usersTable">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Email</th>
+              <th>Display name</th>
+              <th>Status</th>
+              <th>Role</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="usersTableBody"></tbody>
+        </table>
+      </div>
+      <p class="message" id="usersMsg"></p>
     </section>
 
     <button id="logoutBtn">Log out</button>
@@ -37,12 +48,98 @@
     const ROLE_HIERARCHY = ['user', 'admin', 'super_admin'];
     const ROLE_LABELS = { user: 'User', admin: 'Admin', super_admin: 'Super Admin' };
 
+    async function loadUsers(role, currentUserId) {
+      const tbody = document.getElementById('usersTableBody');
+      const msg = document.getElementById('usersMsg');
+
+      const res = await fetch('/api/users');
+      if (!res.ok) {
+        msg.textContent = 'Could not load users.';
+        return;
+      }
+      const { users } = await res.json();
+
+      tbody.innerHTML = '';
+      users.forEach((u) => {
+        const tr = document.createElement('tr');
+
+        const usernameTd = document.createElement('td');
+        usernameTd.textContent = u.username;
+
+        const emailTd = document.createElement('td');
+        emailTd.textContent = u.email;
+
+        const nameTd = document.createElement('td');
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = u.display_name || '';
+        nameInput.placeholder = '(none)';
+        nameTd.appendChild(nameInput);
+
+        const statusTd = document.createElement('td');
+        const statusSelect = document.createElement('select');
+        ['active', 'disabled'].forEach((s) => {
+          const opt = document.createElement('option');
+          opt.value = s;
+          opt.textContent = s;
+          if (u.status === s) opt.selected = true;
+          statusSelect.appendChild(opt);
+        });
+        statusTd.appendChild(statusSelect);
+
+        const roleTd = document.createElement('td');
+        let roleSelect = null;
+        if (role === 'super_admin' && u.id !== currentUserId) {
+          roleSelect = document.createElement('select');
+          ROLE_HIERARCHY.forEach((r) => {
+            const opt = document.createElement('option');
+            opt.value = r;
+            opt.textContent = ROLE_LABELS[r];
+            if (u.role === r) opt.selected = true;
+            roleSelect.appendChild(opt);
+          });
+          roleTd.appendChild(roleSelect);
+        } else {
+          roleTd.textContent = ROLE_LABELS[u.role] || u.role;
+        }
+
+        const actionTd = document.createElement('td');
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.textContent = 'Save';
+        actionTd.appendChild(saveBtn);
+
+        tr.append(usernameTd, emailTd, nameTd, statusTd, roleTd, actionTd);
+        tbody.appendChild(tr);
+
+        saveBtn.addEventListener('click', async () => {
+          msg.textContent = '';
+          const body = {
+            display_name: nameInput.value,
+            status: statusSelect.value
+          };
+          if (roleSelect) body.role = roleSelect.value;
+
+          const patchRes = await fetch(`/api/users/${u.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          const patchData = await patchRes.json();
+          msg.textContent = patchRes.ok
+            ? `Saved ${u.username}.`
+            : (patchData.error || 'Update failed.');
+          msg.style.color = patchRes.ok ? 'var(--accent)' : 'var(--error)';
+        });
+      });
+    }
+
     (async () => {
       const res = await fetch('/api/me');
       const data = await res.json();
 
       document.getElementById('welcome').textContent = data.loggedIn
-        ? `Logged in as ${data.email}`
+        ? `Logged in as ${data.username}`
         : 'Not logged in.';
 
       if (!data.loggedIn) return;
@@ -57,6 +154,13 @@
         const minRank = ROLE_HIERARCHY.indexOf(panel.dataset.minRole);
         panel.hidden = roleRank < minRank;
       });
+
+      if (roleRank >= ROLE_HIERARCHY.indexOf('admin')) {
+        document.getElementById('userMgmtNote').textContent = role === 'super_admin'
+          ? 'You can edit any field below, including role (except your own).'
+          : 'You can edit name and status. Only a super admin can change roles.';
+        loadUsers(role, data.id);
+      }
     })();
 
     document.getElementById('logoutBtn').addEventListener('click', async () => {

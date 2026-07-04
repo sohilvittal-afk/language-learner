@@ -1,13 +1,14 @@
 {
     "name": "local-login-app",
     "version": "1.0.0",
-    "description": "A locally-runnable website with real authentication (Supabase Auth + server sessions)",
+    "description": "A locally-runnable website with real authentication (bcrypt-hashed credentials in Supabase + server sessions)",
     "main": "server.js",
     "scripts": {
         "start": "node server.js"
     },
     "dependencies": {
         "@supabase/supabase-js": "^2.45.4",
+        "bcryptjs": "^2.4.3",
         "dotenv": "^17.4.2",
         "express": "^4.19.2",
         "express-rate-limit": "^8.5.2",
