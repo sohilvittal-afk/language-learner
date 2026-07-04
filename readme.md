@@ -7,7 +7,7 @@ npm install
 npm start
 ```
 
-Then open http://localhost:3000/login.html
+Then open http://localhost:4000 (redirects to the login page)
 
 ## What's actually happening
 
