@@ -8,11 +8,14 @@ both tables with zero policies, so nothing gets in except via that key).
 
 1. Create a project at [supabase.com](https://supabase.com) (or use an existing one).
 2. Copy the project URL and the **service_role** secret key from **Settings → API**.
-3. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+3. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Also set `ANTHROPIC_API_KEY` (from [console.anthropic.com](https://console.anthropic.com)) if you want Side Quests to work — everything else runs fine without it.
 4. Open **SQL Editor** in your Supabase project and run, in order:
    1. `supabase/users.sql` — creates the `users` table (username, email, bcrypt password hash).
    2. `supabase/profiles.sql` — creates the `profiles` table (role, display name, status, notes), linked 1:1 to `users`.
    3. `supabase/education_content.sql` — creates the `education_content` table and a public `education-content` storage bucket for lesson images/screenshots.
+   4. `supabase/words.sql` — creates the `words` table, the shared vocabulary bank.
+   5. `supabase/user_word_progress.sql` — creates `user_word_progress`, each learner's spaced-repetition record per word.
+   6. `supabase/side_quests.sql` — creates `side_quests`, the AI-generated story + quiz journey entries.
 
 ## Run it
 
@@ -46,6 +49,10 @@ Then open http://localhost:4000 (redirects to the login page)
   - Only super admins can change `role`, and a super admin can't change their own role (avoids locking yourself out).
   - Promoting the *first* super admin still has to happen manually: open **Table Editor → profiles** in Supabase and edit the `role` column directly, since there's no one with super-admin rights yet to do it through the app.
 - Every logged-in user (any role) sees an **Education** panel listing lesson posts (title, description, optional image). Super admins additionally see a **Content Management** panel to publish, attach an image/screenshot to, and delete those posts — backed by `GET/POST /api/education` and `DELETE /api/education/:id`. Images are sent from the browser as a base64 data URL, validated and uploaded server-side (via the service role key) to the public `education-content` Supabase Storage bucket, capped at 4MB.
+- The top bar (`public/nav.js`) is on every page after login, with hover dropdown menus (**Learn** → Practice/Side Quests/Word Bank, **Manage** for admins+) — see `supabase/words.sql`, `supabase/user_word_progress.sql`, `supabase/side_quests.sql`.
+- **Word Bank** (`words.html`, `GET/POST/DELETE /api/words`) is the shared vocabulary every learner draws from. Anyone logged in can browse it; admins and super admins can add or remove words (term, definition, example sentence, part of speech, difficulty).
+- **Practice** (`practice.html`, `GET /api/practice/next`, `POST /api/practice/answer`) is flashcard review driven by a simplified SM-2 spaced-repetition algorithm (`lib/learning.js`): each right/wrong answer adjusts an ease factor and reschedules the word's `next_review_at` in `user_word_progress`, so struggled-with words resurface sooner and mastered ones drift further out. A word with no progress row yet counts as immediately due, so new words get introduced automatically.
+- **Side Quests** (`side-quests.html`, `POST /api/side-quests/generate`, `GET /api/side-quests[/:id]`, `POST /api/side-quests/:id/complete`) is a journey map of AI-generated short conversations. Each quest calls Claude (`claude-opus-4-8`, via `@anthropic-ai/sdk`) to weave up to 5 of the learner's due/new words into a short story with a per-word comprehension quiz (requested as structured JSON via `output_config.format`). Completing a quest grades the quiz and feeds each word's result back into the same spaced-repetition system as Practice. Correct quiz answers are stripped from the API response until a quest is completed, so the check is enforced server-side.
 
 ## Known gaps you should close before this touches the internet
 

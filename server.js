@@ -7,6 +7,14 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
 const { getServiceRoleClient } = require('./lib/supabaseClient');
+const {
+  MAX_QUEST_WORDS,
+  recordAnswer,
+  pickWordsForUser,
+  generateSideQuestStory,
+  attachWordIds,
+  stripQuizAnswers
+} = require('./lib/learning');
 
 const VALID_ROLES = ['user', 'admin', 'super_admin'];
 const BCRYPT_ROUNDS = 12;
@@ -107,6 +115,15 @@ function requireRole(minRole) {
 // a static handler for /public would otherwise serve this file to anyone.
 app.get('/dashboard.html', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+app.get('/words.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'words.html'));
+});
+app.get('/practice.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'practice.html'));
+});
+app.get('/side-quests.html', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'side-quests.html'));
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -414,6 +431,275 @@ app.delete('/api/education/:id', requireRole('super_admin'), async (req, res) =>
   const { error } = await supabase.from('education_content').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+// --- word bank -----------------------------------------------------------
+// The shared vocabulary every learner draws from — for flashcard review and
+// for Side Quest stories. Any logged-in user can browse it; only admins and
+// super admins can add or remove words.
+app.get('/api/words', requireRole('user'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase
+    .from('words')
+    .select('id, term, definition, example_sentence, part_of_speech, difficulty, created_at')
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ words: data || [] });
+});
+
+app.post('/api/words', requireRole('admin'), async (req, res) => {
+  const { term, definition, example_sentence, part_of_speech, difficulty } = req.body;
+  if (!term || !term.trim() || !definition || !definition.trim()) {
+    return res.status(400).json({ error: 'Term and definition are required.' });
+  }
+  if (difficulty && !['easy', 'medium', 'hard'].includes(difficulty)) {
+    return res.status(400).json({ error: 'Difficulty must be easy, medium, or hard.' });
+  }
+
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase
+    .from('words')
+    .insert({
+      term: term.trim(),
+      definition: definition.trim(),
+      example_sentence: example_sentence && example_sentence.trim() ? example_sentence.trim() : null,
+      part_of_speech: part_of_speech && part_of_speech.trim() ? part_of_speech.trim() : null,
+      difficulty: difficulty || 'medium',
+      created_by: req.session.userId
+    })
+    .select('id, term, definition, example_sentence, part_of_speech, difficulty, created_at')
+    .single();
+
+  if (error) {
+    if (error.code === '23505') return res.status(400).json({ error: 'That word is already in the bank.' });
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ word: data });
+});
+
+app.delete('/api/words/:id', requireRole('admin'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { error } = await supabase.from('words').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// --- flashcard review (spaced repetition) ---------------------------------
+// GET returns words due for review (or never-studied ones) — see
+// pickWordsForUser in lib/learning.js. POST records a right/wrong answer and
+// reschedules that word with a simplified SM-2 algorithm, so weaker words
+// resurface sooner and mastered ones drift further out.
+app.get('/api/practice/next', requireRole('user'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  try {
+    const words = await pickWordsForUser(supabase, req.session.userId, 10);
+    res.json({ words });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/practice/answer', requireRole('user'), async (req, res) => {
+  const { word_id, correct } = req.body;
+  if (!word_id || typeof correct !== 'boolean') {
+    return res.status(400).json({ error: 'word_id and correct (boolean) are required.' });
+  }
+
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data: word } = await supabase.from('words').select('id').eq('id', word_id).maybeSingle();
+  if (!word) return res.status(404).json({ error: 'Word not found.' });
+
+  try {
+    const progress = await recordAnswer(supabase, req.session.userId, word_id, correct);
+    res.json({ progress });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- side quests -----------------------------------------------------------
+// Each quest is an AI-written short conversation weaving in up to 5 words
+// from the learner's word bank (see generateSideQuestStory in
+// lib/learning.js), plus a short comprehension quiz. `quiz` in the DB row
+// holds correct answers — stripQuizAnswers keeps those out of the response
+// until the quest is completed, so it's enforced here, not just hidden by
+// the UI.
+app.post('/api/side-quests/generate', requireRole('user'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  let words;
+  try {
+    words = await pickWordsForUser(supabase, req.session.userId, MAX_QUEST_WORDS);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+  if (words.length === 0) {
+    return res.status(400).json({ error: 'No words in the word bank yet — ask an admin to add some first.' });
+  }
+
+  let story;
+  try {
+    story = await generateSideQuestStory(words);
+  } catch (err) {
+    return res.status(502).json({ error: `Could not generate a side quest: ${err.message}` });
+  }
+
+  const withIds = attachWordIds(story, words);
+  if (!withIds.quiz.length) {
+    return res.status(502).json({ error: 'Could not generate a valid side quest. Try again.' });
+  }
+
+  const { count, error: countError } = await supabase
+    .from('side_quests')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', req.session.userId);
+  if (countError) return res.status(500).json({ error: countError.message });
+
+  const { data, error } = await supabase
+    .from('side_quests')
+    .insert({
+      user_id: req.session.userId,
+      sequence_number: (count || 0) + 1,
+      title: withIds.title,
+      setting: withIds.setting || null,
+      lines: withIds.lines,
+      quiz: withIds.quiz,
+      word_ids: words.map((w) => w.id),
+      status: 'in_progress'
+    })
+    .select('id, sequence_number, title, setting, lines, quiz, status, created_at')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ quest: stripQuizAnswers(data) });
+});
+
+app.get('/api/side-quests', requireRole('user'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase
+    .from('side_quests')
+    .select('id, sequence_number, title, status, score, created_at, completed_at')
+    .eq('user_id', req.session.userId)
+    .order('sequence_number', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ quests: data || [] });
+});
+
+app.get('/api/side-quests/:id', requireRole('user'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase
+    .from('side_quests')
+    .select('id, sequence_number, title, setting, lines, quiz, status, score, created_at, completed_at')
+    .eq('id', req.params.id)
+    .eq('user_id', req.session.userId)
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Side quest not found.' });
+  res.json({ quest: data.status === 'completed' ? data : stripQuizAnswers(data) });
+});
+
+app.post('/api/side-quests/:id/complete', requireRole('user'), async (req, res) => {
+  const { answers } = req.body;
+  if (!Array.isArray(answers)) return res.status(400).json({ error: 'answers array is required.' });
+
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data: quest, error } = await supabase
+    .from('side_quests')
+    .select('id, quiz, status')
+    .eq('id', req.params.id)
+    .eq('user_id', req.session.userId)
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!quest) return res.status(404).json({ error: 'Side quest not found.' });
+  if (quest.status === 'completed') return res.status(400).json({ error: 'This side quest is already complete.' });
+
+  const selectedByWordId = new Map(answers.map((a) => [a.word_id, a.selectedIndex]));
+  const results = [];
+  const gradedQuiz = [];
+  let correctCount = 0;
+
+  for (const item of quest.quiz) {
+    const selectedIndex = selectedByWordId.has(item.word_id) ? selectedByWordId.get(item.word_id) : null;
+    const correct = selectedIndex === item.correctIndex;
+    if (correct) correctCount += 1;
+    results.push({ word_id: item.word_id, word: item.word, correct, correctIndex: item.correctIndex, selectedIndex });
+    gradedQuiz.push({ ...item, selectedIndex });
+
+    try {
+      await recordAnswer(supabase, req.session.userId, item.word_id, correct);
+    } catch (err) {
+      console.warn(`Could not update progress for word ${item.word_id}:`, err.message);
+    }
+  }
+
+  const score = quest.quiz.length ? Math.round((correctCount / quest.quiz.length) * 100) : 0;
+
+  const { data: updatedQuest, error: updateError } = await supabase
+    .from('side_quests')
+    .update({ status: 'completed', score, completed_at: new Date().toISOString(), quiz: gradedQuiz })
+    .eq('id', req.params.id)
+    .select('id, sequence_number, title, setting, lines, quiz, status, score, created_at, completed_at')
+    .single();
+
+  if (updateError) return res.status(500).json({ error: updateError.message });
+  res.json({ quest: updatedQuest, results, score });
 });
 
 app.listen(PORT, () => {

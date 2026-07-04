@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Side Quests</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app-nav"></div>
+  <div class="page-wrap">
+    <div class="page-header">
+      <h1>Side Quests</h1>
+      <p>A story-driven journey through your word bank — each quest weaves up to 5 words into a short conversation, then checks you understood them.</p>
+    </div>
+
+    <div id="journeyView">
+      <p class="spinner-text">Loading your journey...</p>
+    </div>
+
+    <div id="questView" hidden></div>
+  </div>
+
+  <script src="nav.js"></script>
+  <script>
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function highlightWords(text, words) {
+      let html = escapeHtml(text);
+      words.forEach((w) => {
+        const re = new RegExp(`\\b(${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\w*)\\b`, 'gi');
+        html = html.replace(re, '<mark>$1</mark>');
+      });
+      return html;
+    }
+
+    async function loadJourney() {
+      const view = document.getElementById('journeyView');
+      const res = await fetch('/api/side-quests');
+      if (!res.ok) {
+        view.innerHTML = '<p class="message">Could not load your side quests.</p>';
+        return;
+      }
+      const { quests } = await res.json();
+
+      const inProgress = quests.find((q) => q.status === 'in_progress');
+      const journey = document.createElement('div');
+      journey.className = 'journey';
+
+      quests.forEach((quest, i) => {
+        if (i > 0) {
+          const connector = document.createElement('div');
+          connector.className = `journey-connector ${quests[i - 1].status === 'completed' ? 'done' : ''}`;
+          journey.appendChild(connector);
+        }
+
+        const wrap = document.createElement('div');
+        wrap.className = `journey-node-wrap ${i % 2 === 0 ? 'align-left' : 'align-right'}`;
+
+        const card = document.createElement('div');
+        card.className = `journey-node-card ${quest.status}`;
+        card.innerHTML = `
+          <div class="journey-node-badge">${quest.status === 'completed' ? '&#10003;' : quest.sequence_number}</div>
+          <div>
+            <div class="journey-node-title">${escapeHtml(quest.title)}</div>
+            <div class="journey-node-meta">Quest ${quest.sequence_number}${quest.status === 'in_progress' ? ' · in progress' : ''}</div>
+          </div>
+          ${quest.status === 'completed' ? `<div class="journey-node-score">${quest.score}%</div>` : ''}
+        `;
+        card.addEventListener('click', () => openQuest(quest.id));
+        wrap.appendChild(card);
+        journey.appendChild(wrap);
+      });
+
+      if (quests.length > 0) {
+        const connector = document.createElement('div');
+        connector.className = `journey-connector ${quests[quests.length - 1].status === 'completed' ? 'done' : ''}`;
+        journey.appendChild(connector);
+      }
+
+      const finalWrap = document.createElement('div');
+      finalWrap.className = 'journey-node-wrap';
+      const finalBtn = document.createElement('button');
+      finalBtn.type = 'button';
+      finalBtn.className = 'journey-new-quest';
+      finalBtn.textContent = inProgress ? 'Continue your quest ->' : (quests.length ? 'Start next quest ->' : 'Start your first quest ->');
+      finalBtn.addEventListener('click', () => {
+        if (inProgress) openQuest(inProgress.id);
+        else generateQuest();
+      });
+      finalWrap.appendChild(finalBtn);
+      journey.appendChild(finalWrap);
+
+      view.innerHTML = '';
+      if (quests.length === 0) {
+        view.innerHTML = '<div class="empty-state"><h2>No quests yet</h2><p>Generate your first one below — it\'ll pull words you need to review.</p></div>';
+      }
+      view.appendChild(journey);
+    }
+
+    async function generateQuest() {
+      const view = document.getElementById('journeyView');
+      view.innerHTML = '<p class="spinner-text">Writing your side quest... this can take a few seconds.</p>';
+      const res = await fetch('/api/side-quests/generate', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        view.innerHTML = `<p class="message">${data.error || 'Could not generate a side quest.'}</p>`;
+        return;
+      }
+      showQuest(data.quest);
+    }
+
+    async function openQuest(id) {
+      const res = await fetch(`/api/side-quests/${id}`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Could not load that quest.');
+        return;
+      }
+      showQuest(data.quest);
+    }
+
+    function showQuest(quest) {
+      document.getElementById('journeyView').hidden = true;
+      const view = document.getElementById('questView');
+      view.hidden = false;
+
+      const words = quest.quiz.map((q) => q.word);
+      const completed = quest.status === 'completed';
+
+      const dialogueHtml = quest.lines
+        .map(
+          (line) => `
+        <div class="quest-line">
+          <div class="quest-speaker">${escapeHtml(line.speaker)}</div>
+          <div class="quest-text">${highlightWords(line.text, words)}</div>
+        </div>
+      `
+        )
+        .join('');
+
+      const quizHtml = quest.quiz
+        .map(
+          (item, qi) => `
+        <div class="quiz-item" data-word-id="${item.word_id}">
+          <div class="quiz-word">${escapeHtml(item.word)}</div>
+          <div class="quiz-question">${escapeHtml(item.question)}</div>
+          <div class="quiz-options">
+            ${item.options
+              .map((opt, oi) => {
+                let cls = 'quiz-option';
+                let disabled = '';
+                if (completed) {
+                  disabled = 'disabled';
+                  if (oi === item.correctIndex) cls += ' correct';
+                  else if (item.selectedIndex === oi) cls += ' incorrect';
+                }
+                return `<button type="button" class="${cls}" data-quiz="${qi}" data-option="${oi}" ${disabled}>${escapeHtml(opt)}</button>`;
+              })
+              .join('')}
+          </div>
+        </div>
+      `
+        )
+        .join('');
+
+      view.innerHTML = `
+        <div class="quest-player">
+          <h2 class="quest-title">${escapeHtml(quest.title)}</h2>
+          ${quest.setting ? `<p class="quest-setting">${escapeHtml(quest.setting)}</p>` : ''}
+          <div class="quest-dialogue">${dialogueHtml}</div>
+          <h3>Check your understanding</h3>
+          <div id="quizList">${quizHtml}</div>
+          ${completed
+            ? `<div class="quest-result"><div class="score">${quest.score}%</div><p class="muted">Quest complete — words you missed will come back sooner in Practice.</p></div>`
+            : `<div class="btn-row"><button type="button" class="btn-secondary" id="backToJourney">Back</button><button type="button" id="submitQuiz" disabled>Submit answers</button></div>`
+          }
+          ${completed ? `<div class="btn-row"><button type="button" class="btn-secondary" id="backToJourney2">Back to journey</button></div>` : ''}
+        </div>
+      `;
+
+      const backBtn = document.getElementById('backToJourney') || document.getElementById('backToJourney2');
+      if (backBtn) backBtn.addEventListener('click', () => { view.hidden = true; document.getElementById('journeyView').hidden = false; loadJourney(); });
+
+      if (!completed) {
+        const selections = {};
+        const submitBtn = document.getElementById('submitQuiz');
+
+        view.querySelectorAll('.quiz-option').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const qi = btn.dataset.quiz;
+            selections[qi] = Number(btn.dataset.option);
+            view.querySelectorAll(`.quiz-option[data-quiz="${qi}"]`).forEach((b) => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            submitBtn.disabled = Object.keys(selections).length < quest.quiz.length;
+          });
+        });
+
+        submitBtn.addEventListener('click', async () => {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Grading...';
+          const answers = quest.quiz.map((item, qi) => ({ word_id: item.word_id, selectedIndex: selections[qi] }));
+          const res = await fetch(`/api/side-quests/${quest.id}/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answers })
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            alert(data.error || 'Could not submit your answers.');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit answers';
+            return;
+          }
+          showQuest(data.quest);
+        });
+      }
+    }
+
+    (async () => {
+      renderNav('side-quests');
+      loadJourney();
+    })();
+  </script>
+</body>
+</html>
