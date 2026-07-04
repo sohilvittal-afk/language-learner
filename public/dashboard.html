@@ -20,6 +20,29 @@
       <p class="muted">Practice vocabulary, review flashcards, and track your own progress.</p>
     </section>
 
+    <section class="panel" data-min-role="user">
+      <h2>Education</h2>
+      <p class="muted">Lessons and reference material published by the team.</p>
+      <div class="education-list" id="educationList"></div>
+      <p class="message" id="educationMsg"></p>
+    </section>
+
+    <section class="panel" data-min-role="super_admin" hidden>
+      <h2>Content Management</h2>
+      <p class="muted">Publish a lesson with an optional image or screenshot. Everyone sees it under Education.</p>
+      <form id="educationForm" class="education-form">
+        <label for="eduTitle">Title</label>
+        <input type="text" id="eduTitle" required>
+        <label for="eduBody">Description</label>
+        <textarea id="eduBody" rows="3"></textarea>
+        <label for="eduImage">Image or screenshot</label>
+        <input type="file" id="eduImage" accept="image/png,image/jpeg,image/gif,image/webp">
+        <button type="submit">Publish</button>
+      </form>
+      <p class="message" id="educationFormMsg"></p>
+      <div class="education-list" id="educationManageList"></div>
+    </section>
+
     <section class="panel" data-min-role="admin" hidden>
       <h2>User Management</h2>
       <p class="muted" id="userMgmtNote"></p>
@@ -134,6 +157,114 @@
       });
     }
 
+    function renderEducationCard(post) {
+      const card = document.createElement('div');
+      card.className = 'education-card';
+
+      const title = document.createElement('h3');
+      title.textContent = post.title;
+      card.appendChild(title);
+
+      if (post.image_url) {
+        const img = document.createElement('img');
+        img.src = post.image_url;
+        img.alt = post.title;
+        card.appendChild(img);
+      }
+
+      if (post.body) {
+        const body = document.createElement('p');
+        body.textContent = post.body;
+        card.appendChild(body);
+      }
+
+      return card;
+    }
+
+    async function loadEducation(canManage) {
+      const listEl = document.getElementById('educationList');
+      const manageListEl = document.getElementById('educationManageList');
+      const msg = document.getElementById('educationMsg');
+
+      const res = await fetch('/api/education');
+      if (!res.ok) {
+        msg.textContent = 'Could not load education content.';
+        return;
+      }
+      const { posts } = await res.json();
+
+      listEl.innerHTML = '';
+      msg.textContent = '';
+      if (posts.length === 0) {
+        listEl.innerHTML = '<p class="muted">Nothing published yet.</p>';
+      } else {
+        posts.forEach((post) => listEl.appendChild(renderEducationCard(post)));
+      }
+
+      if (!canManage || !manageListEl) return;
+
+      manageListEl.innerHTML = '';
+      posts.forEach((post) => {
+        const card = renderEducationCard(post);
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', async () => {
+          if (!confirm(`Delete "${post.title}"?`)) return;
+          const delRes = await fetch(`/api/education/${post.id}`, { method: 'DELETE' });
+          if (delRes.ok) loadEducation(true);
+        });
+        card.appendChild(deleteBtn);
+        manageListEl.appendChild(card);
+      });
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    document.getElementById('educationForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.target;
+      const formMsg = document.getElementById('educationFormMsg');
+      formMsg.textContent = '';
+
+      const title = document.getElementById('eduTitle').value;
+      const body = document.getElementById('eduBody').value;
+      const file = document.getElementById('eduImage').files[0];
+
+      let image = null;
+      if (file) {
+        try {
+          image = await readFileAsDataUrl(file);
+        } catch (err) {
+          formMsg.style.color = 'var(--error)';
+          formMsg.textContent = 'Could not read the selected file.';
+          return;
+        }
+      }
+
+      const res = await fetch('/api/education', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body, image })
+      });
+      const data = await res.json();
+
+      formMsg.style.color = res.ok ? 'var(--accent)' : 'var(--error)';
+      formMsg.textContent = res.ok ? 'Published.' : (data.error || 'Could not publish.');
+
+      if (res.ok) {
+        form.reset();
+        loadEducation(true);
+      }
+    });
+
     (async () => {
       const res = await fetch('/api/me');
       const data = await res.json();
@@ -161,6 +292,8 @@
           : 'You can edit name and status. Only a super admin can change roles.';
         loadUsers(role, data.id);
       }
+
+      loadEducation(role === 'super_admin');
     })();
 
     document.getElementById('logoutBtn').addEventListener('click', async () => {

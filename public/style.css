@@ -190,3 +190,70 @@
     font-size: 0.8rem;
   }
 
+  textarea {
+    width: 100%;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    background: #0d0f15;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: vertical;
+  }
+
+  textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .education-form input[type="file"] {
+    width: 100%;
+    padding: 6px 0;
+    margin-bottom: 16px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+  }
+
+  .education-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .education-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+
+  .education-card h3 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+  }
+
+  .education-card img {
+    display: block;
+    max-width: 100%;
+    border-radius: 6px;
+    margin-bottom: 8px;
+  }
+
+  .education-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+  }
+
+  .education-card button {
+    width: auto;
+    margin-top: 8px;
+    padding: 4px 12px;
+    font-size: 0.8rem;
+  }
+

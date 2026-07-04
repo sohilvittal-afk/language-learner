@@ -4,6 +4,7 @@ const express = require('express');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const path = require('path');
 const { getServiceRoleClient } = require('./lib/supabaseClient');
 
@@ -11,6 +12,7 @@ const VALID_ROLES = ['user', 'admin', 'super_admin'];
 const BCRYPT_ROUNDS = 12;
 const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,32}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 // Compared against on every failed lookup so a login attempt for a
 // nonexistent username takes the same time as one for a real user — without
@@ -49,7 +51,9 @@ const PORT = process.env.PORT || 4000;
 
 // --- middleware --------------------------------------------------------
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+// Raised from the default 100kb so a base64-encoded screenshot (see
+// POST /api/education) fits in the request body alongside its JSON wrapper.
+app.use(express.json({ limit: '6mb' }));
 
 // Keyed per-IP: 5 login attempts / 15 min blocks brute-forcing, 10 signups / hour blocks spam accounts.
 const loginLimiter = rateLimit({
@@ -312,6 +316,104 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
   res.json({ user: data });
+});
+
+// Decodes a data URL (e.g. "data:image/png;base64,...") from the Content
+// Management form, validates its type/size, and uploads it to the public
+// 'education-content' storage bucket (see supabase/education_content.sql).
+// Returns the public URL to store in education_content.image_url.
+async function uploadEducationImage(supabase, dataUrl) {
+  const match = /^data:image\/(png|jpe?g|gif|webp);base64,(.+)$/i.exec(dataUrl || '');
+  if (!match) {
+    throw new Error('Image must be a PNG, JPEG, GIF, or WEBP file.');
+  }
+
+  const ext = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
+  const buffer = Buffer.from(match[2], 'base64');
+  if (buffer.length > MAX_IMAGE_BYTES) {
+    throw new Error('Image must be smaller than 4MB.');
+  }
+
+  const filePath = `${crypto.randomUUID()}.${ext}`;
+  const { error: uploadError } = await supabase.storage
+    .from('education-content')
+    .upload(filePath, buffer, { contentType: `image/${ext}` });
+
+  if (uploadError) throw new Error(uploadError.message);
+
+  const { data } = supabase.storage.from('education-content').getPublicUrl(filePath);
+  return data.publicUrl;
+}
+
+// --- education content ---------------------------------------------------
+// Lesson posts (title, body, optional image) that super admins publish and
+// every logged-in user — any role — can read. Only requireRole('super_admin')
+// gates the write routes below; GET just requires being logged in.
+app.get('/api/education', requireRole('user'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase
+    .from('education_content')
+    .select('id, title, body, image_url, created_at')
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ posts: data || [] });
+});
+
+app.post('/api/education', requireRole('super_admin'), async (req, res) => {
+  const { title, body, image } = req.body;
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: 'Title is required.' });
+  }
+
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  let imageUrl = null;
+  if (image) {
+    try {
+      imageUrl = await uploadEducationImage(supabase, image);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('education_content')
+    .insert({
+      title: title.trim(),
+      body: body ? body.trim() : null,
+      image_url: imageUrl,
+      created_by: req.session.userId
+    })
+    .select('id, title, body, image_url, created_at')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ post: data });
+});
+
+app.delete('/api/education/:id', requireRole('super_admin'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { error } = await supabase.from('education_content').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
 });
 
 app.listen(PORT, () => {

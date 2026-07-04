@@ -12,6 +12,7 @@ both tables with zero policies, so nothing gets in except via that key).
 4. Open **SQL Editor** in your Supabase project and run, in order:
    1. `supabase/users.sql` — creates the `users` table (username, email, bcrypt password hash).
    2. `supabase/profiles.sql` — creates the `profiles` table (role, display name, status, notes), linked 1:1 to `users`.
+   3. `supabase/education_content.sql` — creates the `education_content` table and a public `education-content` storage bucket for lesson images/screenshots.
 
 ## Run it
 
@@ -44,6 +45,7 @@ Then open http://localhost:4000 (redirects to the login page)
   - Admins can edit any user's `display_name` and `status`.
   - Only super admins can change `role`, and a super admin can't change their own role (avoids locking yourself out).
   - Promoting the *first* super admin still has to happen manually: open **Table Editor → profiles** in Supabase and edit the `role` column directly, since there's no one with super-admin rights yet to do it through the app.
+- Every logged-in user (any role) sees an **Education** panel listing lesson posts (title, description, optional image). Super admins additionally see a **Content Management** panel to publish, attach an image/screenshot to, and delete those posts — backed by `GET/POST /api/education` and `DELETE /api/education/:id`. Images are sent from the browser as a base64 data URL, validated and uploaded server-side (via the service role key) to the public `education-content` Supabase Storage bucket, capped at 4MB.
 
 ## Known gaps you should close before this touches the internet
 
