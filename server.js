@@ -4,7 +4,7 @@ const express = require('express');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
-const { getSupabaseClient, getSupabaseClientForToken } = require('./lib/supabaseClient');
+const { getSupabaseClient, getSupabaseClientForToken, getServiceRoleClient } = require('./lib/supabaseClient');
 
 const VALID_ROLES = ['user', 'admin', 'super_admin'];
 
@@ -73,6 +73,22 @@ app.use(session({
 function requireAuth(req, res, next) {
   if (req.session && req.session.userId) return next();
   return res.redirect('/login.html');
+}
+
+// JSON-API counterpart to requireAuth/role checks — used by /api/users so a
+// logged-out or under-privileged caller gets a 401/403 instead of a redirect.
+function requireRole(minRole) {
+  const minRank = VALID_ROLES.indexOf(minRole);
+  return (req, res, next) => {
+    if (!req.session || !req.session.userId) {
+      return res.status(401).json({ error: 'Not logged in.' });
+    }
+    const rank = VALID_ROLES.indexOf(req.session.role || 'user');
+    if (rank < minRank) {
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    }
+    next();
+  };
 }
 
 // Registered before express.static so the auth check below actually runs —
@@ -145,13 +161,85 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/me', (req, res) => {
   if (req.session && req.session.userId) {
-    return res.json({ loggedIn: true, email: req.session.email, role: req.session.role || 'user' });
+    return res.json({ loggedIn: true, id: req.session.userId, email: req.session.email, role: req.session.role || 'user' });
   }
   res.json({ loggedIn: false });
 });
 
 app.get('/', (req, res) => {
   res.redirect('/login.html');
+});
+
+// --- admin user management ---------------------------------------------
+// Both routes run as the service role (bypasses RLS) — authorization is
+// enforced here in Express, not by Supabase policies, so keep these checks
+// in sync with anything the profiles table itself allows.
+app.get('/api/users', requireRole('admin'), async (req, res) => {
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase service role is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, email, display_name, role, status, notes, created_at')
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ users: data });
+});
+
+app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
+  const { id } = req.params;
+  const { display_name, status, notes, role } = req.body;
+  const updates = {};
+
+  if (display_name !== undefined) updates.display_name = display_name;
+  if (notes !== undefined) updates.notes = notes;
+
+  if (status !== undefined) {
+    if (!['active', 'disabled'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be active or disabled.' });
+    }
+    updates.status = status;
+  }
+
+  if (role !== undefined) {
+    if (req.session.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only super admins can change roles.' });
+    }
+    if (id === req.session.userId) {
+      return res.status(400).json({ error: 'You cannot change your own role.' });
+    }
+    if (!VALID_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role.' });
+    }
+    updates.role = role;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'No valid fields to update.' });
+  }
+
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase service role is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update(updates)
+    .eq('id', id)
+    .select('id, email, display_name, role, status, notes')
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'User not found.' });
+  res.json({ user: data });
 });
 
 app.listen(PORT, () => {

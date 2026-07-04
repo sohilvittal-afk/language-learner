@@ -6,7 +6,8 @@
 2. Email/password auth is on by default — nothing to enable in the dashboard.
 3. Copy the project URL and `anon` public key from **Settings → API**.
 4. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
-5. Open **SQL Editor** in your Supabase project and run `supabase/profiles.sql` once — this creates the `profiles` table that backs role-based access on the dashboard.
+5. Also copy the **service_role** secret key from the same **Settings → API** page into `SUPABASE_SERVICE_ROLE_KEY` — it powers the admin user-management API (`/api/users`) and must never be exposed to the browser.
+6. Open **SQL Editor** in your Supabase project and run `supabase/profiles.sql` once — this creates the `profiles` table that backs role-based access on the dashboard.
 
 By default Supabase requires users to confirm their email before they can log in
 (**Authentication → Providers → Email → Confirm email**). Turn that off in the
@@ -31,8 +32,11 @@ Then open http://localhost:4000 (redirects to the login page)
 - `/dashboard.html` is protected server-side by middleware, not by hiding a link — you can't get in by guessing the URL.
 - Login and "user doesn't exist" return the identical error, so an attacker can't enumerate valid emails.
 - `/api/login` and `/api/register` are rate-limited per IP (`express-rate-limit`) — 5 login attempts per 15 minutes, 10 signups per hour — so brute-forcing or spamming accounts gets a `429` instead of unlimited tries.
-- Every user has a role — `user`, `admin`, or `super_admin` — stored in the `profiles` table (`supabase/profiles.sql`). A row is created automatically with role `user` the first time someone logs in. `/dashboard.html` shows different panels depending on role, and `/api/me` reports it alongside the session's email.
-- Promoting someone to `admin` or `super_admin` is a manual step: open **Table Editor → profiles** in Supabase and edit their `role` column. There's no update policy on the table and no in-app way to change roles, so a user can never grant themselves (or anyone else) a higher role.
+- Every user has a role — `user`, `admin`, or `super_admin` — plus `display_name`, `status` (`active`/`disabled`), and `notes`, all stored in the `profiles` table (`supabase/profiles.sql`). A row is created automatically with role `user` the first time someone logs in. `/dashboard.html` shows different panels depending on role, and `/api/me` reports the role alongside the session's email.
+- Admins and super admins see a **User Management** panel on the dashboard, backed by `GET /api/users` and `PATCH /api/users/:id`. Both routes check the caller's role in Express (`requireRole`) and then use the Supabase **service role** key, which bypasses row-level security — RLS on `profiles` still only allows a user to read their own row, so this admin path is the one deliberate exception, gated entirely by application code.
+  - Admins can edit any user's `display_name` and `status`.
+  - Only super admins can change `role`, and a super admin can't change their own role (avoids locking yourself out).
+  - Promoting the *first* super admin still has to happen manually: open **Table Editor → profiles** in Supabase and edit the `role` column directly, since there's no one with super-admin rights yet to do it through the app.
 
 ## Known gaps you should close before this touches the internet
 
