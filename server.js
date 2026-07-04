@@ -200,8 +200,14 @@ app.post('/api/logout', (req, res) => {
   });
 });
 
-app.get('/api/me', (req, res) => {
+app.get('/api/me', async (req, res) => {
   if (req.session && req.session.userId) {
+    try {
+      const supabase = getServiceRoleClient();
+      req.session.role = await resolveRole(supabase, req.session.userId);
+    } catch (err) {
+      // Supabase unreachable/unconfigured — fall back to the cached session role.
+    }
     return res.json({
       loggedIn: true,
       id: req.session.userId,
