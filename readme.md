@@ -24,6 +24,8 @@ npm install
 npm start
 ```
 
+While developing, use `npm run dev` instead — it runs Node in watch mode, restarting the server automatically whenever `server.js`, anything in `lib/`, or `.env` changes. Pages in `public/` never need a restart either way; they're read from disk on every request, so a browser reload is enough.
+
 Then open http://localhost:4000 (redirects to the login page)
 
 ## What's actually happening
