@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Register</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="card">
+    <h1>Create an account</h1>
+    <p class="subtitle">Password must be at least 8 characters.</p>
+    <div class="message" id="msg"></div>
+    <form id="registerForm">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required>
+
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8">
+
+      <button type="submit">Register</button>
+    </form>
+    <div class="footer-link">Already have an account? <a href="login.html">Log in</a></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('registerForm');
+    const msg = document.getElementById('msg');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.textContent = '';
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        window.location.href = '/login.html';
+      } else {
+        msg.textContent = data.error || 'Something went wrong.';
+      }
+    });
+  </script>
+</body>
+</html>
