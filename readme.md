@@ -6,6 +6,7 @@
 2. Email/password auth is on by default — nothing to enable in the dashboard.
 3. Copy the project URL and `anon` public key from **Settings → API**.
 4. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+5. Open **SQL Editor** in your Supabase project and run `supabase/profiles.sql` once — this creates the `profiles` table that backs role-based access on the dashboard.
 
 By default Supabase requires users to confirm their email before they can log in
 (**Authentication → Providers → Email → Confirm email**). Turn that off in the
@@ -30,6 +31,8 @@ Then open http://localhost:4000 (redirects to the login page)
 - `/dashboard.html` is protected server-side by middleware, not by hiding a link — you can't get in by guessing the URL.
 - Login and "user doesn't exist" return the identical error, so an attacker can't enumerate valid emails.
 - `/api/login` and `/api/register` are rate-limited per IP (`express-rate-limit`) — 5 login attempts per 15 minutes, 10 signups per hour — so brute-forcing or spamming accounts gets a `429` instead of unlimited tries.
+- Every user has a role — `user`, `admin`, or `super_admin` — stored in the `profiles` table (`supabase/profiles.sql`). A row is created automatically with role `user` the first time someone logs in. `/dashboard.html` shows different panels depending on role, and `/api/me` reports it alongside the session's email.
+- Promoting someone to `admin` or `super_admin` is a manual step: open **Table Editor → profiles** in Supabase and edit their `role` column. There's no update policy on the table and no in-app way to change roles, so a user can never grant themselves (or anyone else) a higher role.
 
 ## Known gaps you should close before this touches the internet
 
