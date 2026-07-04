@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 4000;
 const USERS_FILE = path.join(__dirname, 'users.json');
 
 // --- storage helpers -------------------------------------------------
@@ -85,6 +85,10 @@ app.get('/api/me', (req, res) => {
     return res.json({ loggedIn: true, username: req.session.userId });
   }
   res.json({ loggedIn: false });
+});
+
+app.get('/', (req, res) => {
+  res.redirect('/login.html');
 });
 
 // --- protected page ---------------------------------------------------
