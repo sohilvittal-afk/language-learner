@@ -4,11 +4,12 @@
     "description": "A locally-runnable website with real authentication (hashed passwords + server sessions)",
     "main": "server.js",
     "scripts": {
-      "start": "node server.js"
+        "start": "node server.js"
     },
     "dependencies": {
-      "express": "^4.19.2",
-      "express-session": "^1.18.0",
-      "bcryptjs": "^2.4.3"
+        "bcryptjs": "^2.4.3",
+        "dotenv": "^17.4.2",
+        "express": "^4.19.2",
+        "express-session": "^1.18.0"
     }
-  }
+}
