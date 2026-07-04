@@ -1,22 +1,12 @@
+require('dotenv').config();
+
 const express = require('express');
 const session = require('express-session');
-const bcrypt = require('bcryptjs');
-const fs = require('fs');
 const path = require('path');
+const { getSupabaseClient } = require('./lib/supabaseClient');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-const USERS_FILE = path.join(__dirname, 'users.json');
-
-// --- storage helpers -------------------------------------------------
-function loadUsers() {
-  if (!fs.existsSync(USERS_FILE)) return {};
-  return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-}
-
-function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
 
 // --- middleware --------------------------------------------------------
 app.use(express.urlencoded({ extended: true }));
@@ -24,7 +14,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use(session({
-  secret: 'change-this-secret-before-deploying-anywhere-real', // dev only
+  secret: process.env.SESSION_SECRET || 'change-this-secret-before-deploying-anywhere-real', // dev only
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -39,38 +29,55 @@ function requireAuth(req, res, next) {
 }
 
 // --- auth routes ---------------------------------------------------
+// User + password never touch our own storage — Supabase Auth owns both.
 app.post('/api/register', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required.' });
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
   }
   if (password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   }
 
-  const users = loadUsers();
-  if (users[username]) {
-    return res.status(409).json({ error: 'That username is already taken.' });
+  let supabase;
+  try {
+    supabase = getSupabaseClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
-  users[username] = { passwordHash, createdAt: new Date().toISOString() };
-  saveUsers(users);
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
 
-  res.json({ ok: true });
+  // With email confirmation enabled (the Supabase default), signUp succeeds
+  // but no session is issued until the user clicks the confirmation link.
+  res.json({ ok: true, needsConfirmation: !data.session });
 });
 
 app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
-  const users = loadUsers();
-  const user = users[username];
-
-  // Same error for missing user vs wrong password — don't leak which one failed.
-  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-    return res.status(401).json({ error: 'Invalid username or password.' });
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
   }
 
-  req.session.userId = username;
+  let supabase;
+  try {
+    supabase = getSupabaseClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+  // Same error for missing user vs wrong password — don't leak which one failed.
+  if (error || !data.session) {
+    return res.status(401).json({ error: 'Invalid email or password.' });
+  }
+
+  req.session.userId = data.user.id;
+  req.session.email = data.user.email;
   res.json({ ok: true });
 });
 
@@ -82,7 +89,7 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/me', (req, res) => {
   if (req.session && req.session.userId) {
-    return res.json({ loggedIn: true, username: req.session.userId });
+    return res.json({ loggedIn: true, email: req.session.email });
   }
   res.json({ loggedIn: false });
 });

@@ -11,8 +11,8 @@
     <p class="subtitle">Enter your credentials to continue.</p>
     <div class="message" id="msg"></div>
     <form id="loginForm">
-      <label for="username">Username</label>
-      <input id="username" name="username" autocomplete="username" required>
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" required>
 
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
@@ -29,13 +29,13 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       msg.textContent = '';
-      const username = document.getElementById('username').value;
+      const email = document.getElementById('email').value;
       const password = document.getElementById('password').value;
 
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ email, password })
       });
       const data = await res.json();
 

@@ -17,7 +17,7 @@
       const res = await fetch('/api/me');
       const data = await res.json();
       document.getElementById('welcome').textContent = data.loggedIn
-        ? `Logged in as ${data.username}`
+        ? `Logged in as ${data.email}`
         : 'Not logged in.';
     })();
 
