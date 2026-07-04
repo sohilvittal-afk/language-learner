@@ -108,7 +108,8 @@
       const msg = document.getElementById('wordsMsg');
       const res = await fetch('/api/words');
       if (!res.ok) {
-        msg.textContent = 'Could not load the word bank.';
+        const errData = await res.json().catch(() => ({}));
+        msg.textContent = errData.error || 'Could not load the word bank.';
         return;
       }
       const { words } = await res.json();

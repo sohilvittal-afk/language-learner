@@ -41,7 +41,10 @@
       const view = document.getElementById('journeyView');
       const res = await fetch('/api/side-quests');
       if (!res.ok) {
-        view.innerHTML = '<p class="message">Could not load your side quests.</p>';
+        const data = await res.json().catch(() => ({}));
+        view.innerHTML = '<p class="message"></p>';
+        view.querySelector('.message').textContent =
+          data.error || 'Could not load your side quests.';
         return;
       }
       const { quests } = await res.json();
