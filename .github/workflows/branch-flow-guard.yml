@@ -1,0 +1,36 @@
+name: Branch flow guard
+
+# Enforces the only allowed promotion path: dev -> staging -> main.
+# Add this workflow's job ("check-source-branch") as a required status
+# check on the staging and main branch protection rules so a PR from the
+# wrong source branch can never be merged.
+
+on:
+  pull_request:
+    branches:
+      - staging
+      - main
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  check-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PR source branch is allowed for this target
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          echo "PR: $HEAD_REF -> $BASE_REF"
+
+          if [ "$BASE_REF" = "staging" ] && [ "$HEAD_REF" != "dev" ]; then
+            echo "::error::Only the 'dev' branch may be merged into 'staging'. Got '$HEAD_REF'."
+            exit 1
+          fi
+
+          if [ "$BASE_REF" = "main" ] && [ "$HEAD_REF" != "staging" ]; then
+            echo "::error::Only the 'staging' branch may be merged into 'main'. Got '$HEAD_REF'."
+            exit 1
+          fi
+
+          echo "Source branch allowed."
