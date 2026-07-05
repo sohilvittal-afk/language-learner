@@ -377,6 +377,8 @@
   .word-card .term { font-size: 1.05rem; font-weight: 800; margin: 0 0 4px; }
   .word-card .pos { color: var(--accent3); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; margin-bottom: 8px; display: inline-block; }
   .word-card .definition { color: var(--text); font-size: 0.88rem; margin: 0 0 8px; }
+  /* AI-filled grammar forms (imperfectum/perfectum, article/plural, ...). */
+  .word-card .grammar-forms { color: var(--accent3); font-size: 0.78rem; font-weight: 600; margin: 0 0 8px; }
   .word-card .example { color: var(--muted); font-size: 0.82rem; font-style: italic; margin: 0; }
 
   .difficulty-chip {
@@ -490,6 +492,8 @@
   .flashcard-hint { color: var(--muted); font-size: 0.8rem; margin-top: 14px; }
   .flashcard-definition { font-size: 1.15rem; margin-bottom: 10px; }
   .flashcard-example { color: var(--muted); font-style: italic; font-size: 0.9rem; }
+  /* AI-filled grammar forms (imperfectum/perfectum, article/plural, ...). */
+  .flashcard-grammar { color: var(--accent3); font-size: 0.85rem; font-weight: 600; margin-bottom: 8px; }
   /* The term in the learner's preferred language, above the definition. */
   .flashcard-translation { color: var(--accent); font-size: 1.4rem; font-weight: 800; margin-bottom: 10px; }
 

@@ -21,6 +21,7 @@ const {
   isSupportedLanguage,
   attachTranslations
 } = require('./lib/translation');
+const { enrichWord } = require('./lib/enrichment');
 
 const VALID_ROLES = ['user', 'admin', 'super_admin'];
 const BCRYPT_ROUNDS = 12;
@@ -525,7 +526,7 @@ app.get('/api/words', requireRole('user'), async (req, res) => {
 
   const { data, error } = await supabase
     .from('words')
-    .select('id, term, definition, example_sentence, part_of_speech, difficulty, language, created_at')
+    .select('id, term, definition, example_sentence, part_of_speech, difficulty, language, grammar_forms, created_at')
     .order('created_at', { ascending: false });
 
   if (error) return res.status(500).json({ error: error.message });
@@ -538,13 +539,13 @@ app.get('/api/words', requireRole('user'), async (req, res) => {
   res.json({ words, translation_language: preferredLanguage });
 });
 
+// Admins only supply the term and its language — the AI fills in everything
+// else (definition, part of speech, example sentence, difficulty, and the
+// part-of-speech specific grammar forms — see lib/enrichment.js).
 app.post('/api/words', requireRole('admin'), async (req, res) => {
-  const { term, definition, example_sentence, part_of_speech, difficulty, language } = req.body;
-  if (!term || !term.trim() || !definition || !definition.trim()) {
-    return res.status(400).json({ error: 'Term and definition are required.' });
-  }
-  if (difficulty && !['easy', 'medium', 'hard'].includes(difficulty)) {
-    return res.status(400).json({ error: 'Difficulty must be easy, medium, or hard.' });
+  const { term, language } = req.body;
+  if (!term || !term.trim()) {
+    return res.status(400).json({ error: 'Term is required.' });
   }
   if (language && !isSupportedLanguage(language)) {
     return res.status(400).json({ error: 'Pick one of the supported languages.' });
@@ -557,18 +558,28 @@ app.post('/api/words', requireRole('admin'), async (req, res) => {
     return res.status(500).json({ error: 'Supabase is not configured on this server.' });
   }
 
+  const wordLanguage = language || DEFAULT_LANGUAGE;
+
+  let enriched;
+  try {
+    enriched = await enrichWord(term.trim(), wordLanguage);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+
   const { data, error } = await supabase
     .from('words')
     .insert({
       term: term.trim(),
-      definition: definition.trim(),
-      example_sentence: example_sentence && example_sentence.trim() ? example_sentence.trim() : null,
-      part_of_speech: part_of_speech && part_of_speech.trim() ? part_of_speech.trim() : null,
-      difficulty: difficulty || 'medium',
-      language: language || DEFAULT_LANGUAGE,
+      definition: enriched.definition,
+      example_sentence: enriched.example_sentence,
+      part_of_speech: enriched.part_of_speech,
+      difficulty: enriched.difficulty,
+      language: wordLanguage,
+      grammar_forms: enriched.grammar_forms,
       created_by: req.session.userId
     })
-    .select('id, term, definition, example_sentence, part_of_speech, difficulty, language, created_at')
+    .select('id, term, definition, example_sentence, part_of_speech, difficulty, language, grammar_forms, created_at')
     .single();
 
   if (error) {
