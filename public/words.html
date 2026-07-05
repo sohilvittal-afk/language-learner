@@ -31,6 +31,27 @@
         <button type="submit" id="addWordBtn">Add word</button>
       </form>
       <p class="message" id="addWordMsg"></p>
+
+      <div class="image-extract">
+        <h3>Or add words from an image</h3>
+        <p class="muted">Upload a screenshot or photo — a page from a book, a vocabulary list, even a picture of objects.
+          The AI reads it, pulls out the words in the language selected above, and you pick which ones to add.</p>
+        <div class="image-extract-controls">
+          <input type="file" id="wordImageInput" accept="image/png,image/jpeg,image/webp,image/gif">
+          <button type="button" id="extractBtn" class="btn-secondary">Read words from image</button>
+        </div>
+        <img id="wordImagePreview" class="image-extract-preview" alt="Preview of the uploaded image" hidden>
+        <p class="message" id="extractMsg"></p>
+        <div id="extractResults" hidden>
+          <p class="muted" id="extractSummary"></p>
+          <div class="extract-word-list" id="extractWordList"></div>
+          <div class="btn-row">
+            <button type="button" id="addSelectedBtn">Add selected words</button>
+            <button type="button" id="clearExtractBtn" class="btn-ghost">Clear</button>
+          </div>
+          <p class="message" id="addSelectedMsg"></p>
+        </div>
+      </div>
     </section>
 
     <p class="message" id="wordsMsg"></p>
@@ -186,6 +207,214 @@
         event.target.reset();
         loadWords();
       }
+    });
+
+    // --- add words from an image -------------------------------------------
+    // Flow: pick a file → "Read words from image" sends it (as a data URL) to
+    // /api/words/extract-image, where a vision model lists the words it sees →
+    // the candidates render as checkboxes (ones already in the bank start
+    // unchecked) → "Add selected words" runs each through the normal
+    // POST /api/words enrichment flow, one at a time, showing per-word status.
+
+    // The server rejects images over 4MB (and Kimi charges by size), so big
+    // screenshots/photos get downscaled and re-encoded as JPEG in the browser
+    // before upload.
+    const MAX_UPLOAD_SIDE = 2000;
+    const MAX_UPLOAD_BYTES = 3.5 * 1024 * 1024;
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Could not read the file.'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function loadImageElement(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That file is not a readable image.')); };
+        img.src = url;
+      });
+    }
+
+    async function prepareImageDataUrl(file) {
+      const img = await loadImageElement(file);
+      const longest = Math.max(img.naturalWidth, img.naturalHeight);
+      if (longest <= MAX_UPLOAD_SIDE && file.size <= MAX_UPLOAD_BYTES) {
+        return readFileAsDataUrl(file);
+      }
+      const scale = Math.min(1, MAX_UPLOAD_SIDE / longest);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.85);
+    }
+
+    function clearExtractResults() {
+      document.getElementById('extractResults').hidden = true;
+      document.getElementById('extractWordList').innerHTML = '';
+      document.getElementById('extractSummary').textContent = '';
+      document.getElementById('addSelectedMsg').textContent = '';
+    }
+
+    document.getElementById('wordImageInput').addEventListener('change', (event) => {
+      const preview = document.getElementById('wordImagePreview');
+      const file = event.target.files[0];
+      document.getElementById('extractMsg').textContent = '';
+      clearExtractResults();
+      if (file) {
+        preview.src = URL.createObjectURL(file);
+        preview.hidden = false;
+      } else {
+        preview.hidden = true;
+        preview.removeAttribute('src');
+      }
+    });
+
+    function renderExtractedWords(words) {
+      const list = document.getElementById('extractWordList');
+      const summary = document.getElementById('extractSummary');
+      list.innerHTML = '';
+
+      const newCount = words.filter((w) => !w.exists).length;
+      summary.textContent = words.length === newCount
+        ? `Found ${words.length} word${words.length === 1 ? '' : 's'}. Untick any you don't want.`
+        : `Found ${words.length} words — ${words.length - newCount} already in the bank (unticked). Untick any others you don't want.`;
+
+      words.forEach((w) => {
+        const label = document.createElement('label');
+        label.className = 'extract-word' + (w.exists ? ' exists' : '');
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = !w.exists;
+        checkbox.value = w.term;
+        label.appendChild(checkbox);
+
+        const text = document.createElement('span');
+        text.textContent = w.term;
+        label.appendChild(text);
+
+        const status = document.createElement('span');
+        status.className = 'status';
+        if (w.exists) status.textContent = 'in bank';
+        label.appendChild(status);
+
+        list.appendChild(label);
+      });
+
+      document.getElementById('extractResults').hidden = false;
+    }
+
+    document.getElementById('extractBtn').addEventListener('click', async () => {
+      const msg = document.getElementById('extractMsg');
+      const btn = document.getElementById('extractBtn');
+      const file = document.getElementById('wordImageInput').files[0];
+      msg.style.color = 'var(--error)';
+      msg.textContent = '';
+      clearExtractResults();
+
+      if (!file) {
+        msg.textContent = 'Pick an image first.';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Reading image...';
+      try {
+        const image = await prepareImageDataUrl(file);
+        const res = await fetch('/api/words/extract-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image, language: document.getElementById('wordLanguage').value })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          msg.textContent = data.error || 'Could not read the image.';
+          return;
+        }
+        if (!data.words.length) {
+          msg.textContent = `The AI found no ${labelForLanguage(data.language)} words in this image. Try another image or language.`;
+          return;
+        }
+        renderExtractedWords(data.words);
+      } catch (err) {
+        msg.textContent = err.message || 'Could not read the image.';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Read words from image';
+      }
+    });
+
+    document.getElementById('clearExtractBtn').addEventListener('click', () => {
+      clearExtractResults();
+      const input = document.getElementById('wordImageInput');
+      input.value = '';
+      input.dispatchEvent(new Event('change'));
+    });
+
+    document.getElementById('addSelectedBtn').addEventListener('click', async () => {
+      const msg = document.getElementById('addSelectedMsg');
+      const btn = document.getElementById('addSelectedBtn');
+      const language = document.getElementById('wordLanguage').value;
+      const rows = Array.from(document.querySelectorAll('#extractWordList .extract-word'))
+        .map((label) => ({ label, checkbox: label.querySelector('input'), status: label.querySelector('.status') }))
+        .filter((row) => row.checkbox.checked && !row.checkbox.disabled);
+
+      msg.style.color = 'var(--error)';
+      if (rows.length === 0) {
+        msg.textContent = 'Tick at least one word first.';
+        return;
+      }
+
+      btn.disabled = true;
+      let added = 0;
+      let failed = 0;
+
+      // One word at a time: each add is its own AI enrichment call, and doing
+      // them sequentially gives per-word progress instead of one long stall.
+      for (let i = 0; i < rows.length; i++) {
+        const { checkbox, status } = rows[i];
+        msg.style.color = 'var(--muted)';
+        msg.textContent = `Adding ${i + 1} of ${rows.length}: "${checkbox.value}"...`;
+        status.textContent = '...';
+        status.className = 'status';
+        try {
+          const res = await fetch('/api/words', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ term: checkbox.value, language })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            added += 1;
+            status.textContent = 'added';
+            status.className = 'status ok';
+            checkbox.checked = false;
+            checkbox.disabled = true;
+          } else {
+            failed += 1;
+            status.textContent = data.error || 'failed';
+            status.className = 'status err';
+          }
+        } catch (err) {
+          failed += 1;
+          status.textContent = 'failed';
+          status.className = 'status err';
+        }
+      }
+
+      btn.disabled = false;
+      msg.style.color = failed ? 'var(--error)' : 'var(--success)';
+      msg.textContent = failed
+        ? `Added ${added} word${added === 1 ? '' : 's'}, ${failed} failed — see each word for details.`
+        : `Added ${added} word${added === 1 ? '' : 's'}.`;
+      if (added > 0) loadWords();
     });
 
     async function loadLanguageOptions() {
