@@ -15,6 +15,10 @@ create table if not exists public.words (
   -- Which language the term is written in ('english', 'dutch', 'german', ...).
   -- The canonical list lives in lib/translation.js and is validated in Express.
   language text not null default 'english',
+  -- Part-of-speech specific forms filled in by the AI when the word is added
+  -- (see lib/enrichment.js): verbs get {imperfectum, perfectum}, nouns
+  -- {article, plural}, adjectives {comparative, superlative}. Null otherwise.
+  grammar_forms jsonb,
   created_by uuid references public.users(id) on delete set null,
   created_at timestamptz not null default now()
 );

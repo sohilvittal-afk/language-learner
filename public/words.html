@@ -16,6 +16,9 @@
 
     <section class="panel" id="addWordPanel" hidden>
       <h2>Add a word</h2>
+      <p class="muted">Just type the word and pick its language — the AI fills in the definition, part of speech,
+        example sentence, difficulty, and grammar forms (imperfectum/perfectum for verbs, article/plural for nouns,
+        comparative/superlative for adjectives).</p>
       <form id="addWordForm" class="add-word-form">
         <div>
           <label for="wordTerm">Term</label>
@@ -25,27 +28,7 @@
           <label for="wordLanguage">Language of this word</label>
           <select id="wordLanguage"></select>
         </div>
-        <div>
-          <label for="wordPos">Part of speech</label>
-          <input id="wordPos" placeholder="e.g. noun, verb" maxlength="40">
-        </div>
-        <div class="full">
-          <label for="wordDefinition">Definition</label>
-          <textarea id="wordDefinition" rows="2" required></textarea>
-        </div>
-        <div class="full">
-          <label for="wordExample">Example sentence (optional)</label>
-          <textarea id="wordExample" rows="2"></textarea>
-        </div>
-        <div>
-          <label for="wordDifficulty">Difficulty</label>
-          <select id="wordDifficulty">
-            <option value="easy">Easy</option>
-            <option value="medium" selected>Medium</option>
-            <option value="hard">Hard</option>
-          </select>
-        </div>
-        <button type="submit">Add word</button>
+        <button type="submit" id="addWordBtn">Add word</button>
       </form>
       <p class="message" id="addWordMsg"></p>
     </section>
@@ -62,6 +45,16 @@
 
     function labelForLanguage(lang) {
       return lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : '';
+    }
+
+    // jsonb doesn't preserve key order, so render grammar forms in a fixed one.
+    const GRAMMAR_FORM_ORDER = ['article', 'plural', 'imperfectum', 'perfectum', 'comparative', 'superlative'];
+
+    function grammarFormsText(forms) {
+      return Object.entries(forms)
+        .sort((a, b) => GRAMMAR_FORM_ORDER.indexOf(a[0]) - GRAMMAR_FORM_ORDER.indexOf(b[0]))
+        .map(([name, value]) => `${name}: ${value}`)
+        .join(' · ');
     }
 
     function wordCard(word) {
@@ -99,6 +92,15 @@
         pos.className = 'pos';
         pos.textContent = word.part_of_speech;
         card.appendChild(pos);
+      }
+
+      // AI-provided forms: imperfectum/perfectum (verbs), article/plural
+      // (nouns), comparative/superlative (adjectives).
+      if (word.grammar_forms && Object.keys(word.grammar_forms).length > 0) {
+        const forms = document.createElement('p');
+        forms.className = 'grammar-forms';
+        forms.textContent = grammarFormsText(word.grammar_forms);
+        card.appendChild(forms);
       }
 
       const definition = document.createElement('p');
@@ -152,30 +154,36 @@
     document.getElementById('addWordForm').addEventListener('submit', async (event) => {
       event.preventDefault();
       const msg = document.getElementById('addWordMsg');
+      const btn = document.getElementById('addWordBtn');
       msg.textContent = '';
 
       const body = {
         term: document.getElementById('wordTerm').value,
-        language: document.getElementById('wordLanguage').value,
-        part_of_speech: document.getElementById('wordPos').value,
-        definition: document.getElementById('wordDefinition').value,
-        example_sentence: document.getElementById('wordExample').value,
-        difficulty: document.getElementById('wordDifficulty').value
+        language: document.getElementById('wordLanguage').value
       };
 
-      const res = await fetch('/api/words', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await res.json();
+      // The AI lookup takes a few seconds — lock the button so a double
+      // click doesn't hit the duplicate-word error.
+      btn.disabled = true;
+      btn.textContent = 'Looking up word...';
+      let res, data;
+      try {
+        res = await fetch('/api/words', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        data = await res.json();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Add word';
+      }
 
       msg.style.color = res.ok ? 'var(--success)' : 'var(--error)';
       msg.textContent = res.ok ? `Added "${data.word.term}".` : (data.error || 'Could not add word.');
 
       if (res.ok) {
         event.target.reset();
-        document.getElementById('wordDifficulty').value = 'medium';
         loadWords();
       }
     });

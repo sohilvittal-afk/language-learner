@@ -29,6 +29,16 @@
       return lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : '';
     }
 
+    // jsonb doesn't preserve key order, so render grammar forms in a fixed one.
+    const GRAMMAR_FORM_ORDER = ['article', 'plural', 'imperfectum', 'perfectum', 'comparative', 'superlative'];
+
+    function grammarFormsText(forms) {
+      return Object.entries(forms)
+        .sort((a, b) => GRAMMAR_FORM_ORDER.indexOf(a[0]) - GRAMMAR_FORM_ORDER.indexOf(b[0]))
+        .map(([name, value]) => `${escapeHtml(name)}: ${escapeHtml(value)}`)
+        .join(' · ');
+    }
+
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
@@ -64,6 +74,9 @@
                 ? `<div class="flashcard-translation">${escapeHtml(labelForLanguage(translationLanguage))}: ${escapeHtml(word.translation)}</div>`
                 : ''}
               <div class="flashcard-definition">${word.definition}</div>
+              ${word.grammar_forms && Object.keys(word.grammar_forms).length > 0
+                ? `<div class="flashcard-grammar">${grammarFormsText(word.grammar_forms)}</div>`
+                : ''}
               ${word.example_sentence ? `<div class="flashcard-example">“${word.example_sentence}”</div>` : ''}
             </div>
           </div>
