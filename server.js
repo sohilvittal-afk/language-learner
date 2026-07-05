@@ -21,7 +21,7 @@ const {
   isSupportedLanguage,
   attachTranslations
 } = require('./lib/translation');
-const { enrichWord } = require('./lib/enrichment');
+const { enrichWord, extractWordsFromImage } = require('./lib/enrichment');
 
 const VALID_ROLES = ['user', 'admin', 'super_admin'];
 const BCRYPT_ROUNDS = 12;
@@ -345,11 +345,10 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
   res.json({ user: data });
 });
 
-// Decodes a data URL (e.g. "data:image/png;base64,...") from the Content
-// Management form, validates its type/size, and uploads it to the public
-// 'education-content' storage bucket (see supabase/education_content.sql).
-// Returns the public URL to store in education_content.image_url.
-async function uploadEducationImage(supabase, dataUrl) {
+// Decodes and validates an image data URL (e.g. "data:image/png;base64,...")
+// as uploaded by the browser forms. Throws a user-facing message on a wrong
+// type or oversized image; returns the decoded bytes plus extension.
+function parseImageDataUrl(dataUrl) {
   const match = /^data:image\/(png|jpe?g|gif|webp);base64,(.+)$/i.exec(dataUrl || '');
   if (!match) {
     throw new Error('Image must be a PNG, JPEG, GIF, or WEBP file.');
@@ -360,6 +359,14 @@ async function uploadEducationImage(supabase, dataUrl) {
   if (buffer.length > MAX_IMAGE_BYTES) {
     throw new Error('Image must be smaller than 4MB.');
   }
+  return { ext, buffer };
+}
+
+// Uploads a validated image from the Content Management form to the public
+// 'education-content' storage bucket (see supabase/education_content.sql).
+// Returns the public URL to store in education_content.image_url.
+async function uploadEducationImage(supabase, dataUrl) {
+  const { ext, buffer } = parseImageDataUrl(dataUrl);
 
   const filePath = `${crypto.randomUUID()}.${ext}`;
   const { error: uploadError } = await supabase.storage
@@ -587,6 +594,61 @@ app.post('/api/words', requireRole('admin'), async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
   res.json({ word: data });
+});
+
+// Reads an uploaded image (screenshot, book page, photo of objects — sent as
+// a base64 data URL, same as the education form) with a vision-capable Kimi
+// model and returns the vocabulary words it found in the requested language,
+// each flagged with whether it's already in the bank. Nothing is stored here:
+// the client shows the candidates and adds the chosen ones through the normal
+// POST /api/words enrichment flow.
+app.post('/api/words/extract-image', requireRole('admin'), async (req, res) => {
+  const { image, language } = req.body;
+  if (!image) {
+    return res.status(400).json({ error: 'Attach an image first.' });
+  }
+  if (language && !isSupportedLanguage(language)) {
+    return res.status(400).json({ error: 'Pick one of the supported languages.' });
+  }
+
+  try {
+    parseImageDataUrl(image);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  let supabase;
+  try {
+    supabase = getServiceRoleClient();
+  } catch (err) {
+    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
+  }
+
+  const wordLanguage = language || DEFAULT_LANGUAGE;
+
+  let terms;
+  try {
+    terms = await extractWordsFromImage(image, wordLanguage);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+
+  // Flag words already in the bank for this language so the UI can uncheck
+  // them up front instead of surfacing duplicate errors one by one later.
+  const existingTerms = new Set();
+  if (terms.length > 0) {
+    const { data: existing, error } = await supabase
+      .from('words')
+      .select('term')
+      .eq('language', wordLanguage);
+    if (error) return res.status(500).json({ error: error.message });
+    for (const row of existing || []) existingTerms.add(row.term.toLowerCase());
+  }
+
+  res.json({
+    language: wordLanguage,
+    words: terms.map((term) => ({ term, exists: existingTerms.has(term.toLowerCase()) }))
+  });
 });
 
 app.delete('/api/words/:id', requireRole('admin'), async (req, res) => {
