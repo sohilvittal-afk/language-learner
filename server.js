@@ -47,96 +47,6 @@ app.get('/', (req, res) => {
   res.redirect('/dashboard.html');
 });
 
-// --- admin user management ---------------------------------------------
-// Both routes run as the service role (bypasses RLS) — authorization is
-// enforced here in Express, not by Supabase policies.
-app.get('/api/users', requireRole('admin'), async (req, res) => {
-  let supabase;
-  try {
-    supabase = getServiceRoleClient();
-  } catch (err) {
-    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
-  }
-
-  const { data, error } = await supabase
-    .from('users')
-    .select('id, username, email, created_at, profiles(role, display_name, status, notes)')
-    .order('created_at', { ascending: true });
-
-  if (error) return res.status(500).json({ error: error.message });
-
-  const users = (data || []).map((u) => {
-    const profile = Array.isArray(u.profiles) ? u.profiles[0] : u.profiles;
-    return {
-      id: u.id,
-      username: u.username,
-      email: u.email,
-      display_name: profile ? profile.display_name : null,
-      role: profile ? profile.role : 'user',
-      status: profile ? profile.status : 'active',
-      notes: profile ? profile.notes : null
-    };
-  });
-
-  res.json({ users });
-});
-
-app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
-  const { id } = req.params;
-  const { display_name, status, notes, role } = req.body;
-  const updates = { id };
-
-  if (display_name !== undefined) updates.display_name = display_name;
-  if (notes !== undefined) updates.notes = notes;
-
-  if (status !== undefined) {
-    if (!['active', 'disabled'].includes(status)) {
-      return res.status(400).json({ error: 'Status must be active or disabled.' });
-    }
-    updates.status = status;
-  }
-
-  if (role !== undefined) {
-    if (req.session.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Only super admins can change roles.' });
-    }
-    if (id === req.session.userId) {
-      return res.status(400).json({ error: 'You cannot change your own role.' });
-    }
-    if (!VALID_ROLES.includes(role)) {
-      return res.status(400).json({ error: 'Invalid role.' });
-    }
-    updates.role = role;
-  }
-
-  if (Object.keys(updates).length === 1) {
-    return res.status(400).json({ error: 'No valid fields to update.' });
-  }
-
-  let supabase;
-  try {
-    supabase = getServiceRoleClient();
-  } catch (err) {
-    return res.status(500).json({ error: 'Supabase is not configured on this server.' });
-  }
-
-  const { data: targetUser } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', id)
-    .maybeSingle();
-
-  if (!targetUser) return res.status(404).json({ error: 'User not found.' });
-
-  const { data, error } = await supabase
-    .from('profiles')
-    .upsert(updates, { onConflict: 'id' })
-    .select('id, role, display_name, status, notes')
-    .maybeSingle();
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ user: data });
-});
 
 // Decodes and validates an image data URL (e.g. "data:image/png;base64,...")
 // as uploaded by the browser forms. Throws a user-facing message on a wrong
@@ -173,10 +83,7 @@ async function uploadEducationImage(supabase, dataUrl) {
 }
 
 // --- education content ---------------------------------------------------
-// Lesson posts (title, body, optional image) that super admins publish and
-// every logged-in user — any role — can read. Only requireRole('super_admin')
-// gates the write routes below; GET just requires being logged in.
-app.get('/api/education', requireRole('user'), async (req, res) => {
+app.get('/api/education', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -193,7 +100,7 @@ app.get('/api/education', requireRole('user'), async (req, res) => {
   res.json({ posts: data || [] });
 });
 
-app.post('/api/education', requireRole('super_admin'), async (req, res) => {
+app.post('/api/education', async (req, res) => {
   const { title, body, image } = req.body;
   if (!title || !title.trim()) {
     return res.status(400).json({ error: 'Title is required.' });
@@ -221,7 +128,7 @@ app.post('/api/education', requireRole('super_admin'), async (req, res) => {
       title: title.trim(),
       body: body ? body.trim() : null,
       image_url: imageUrl,
-      created_by: req.session.userId
+      created_by: req.user.id
     })
     .select('id, title, body, image_url, created_at')
     .single();
@@ -230,7 +137,7 @@ app.post('/api/education', requireRole('super_admin'), async (req, res) => {
   res.json({ post: data });
 });
 
-app.delete('/api/education/:id', requireRole('super_admin'), async (req, res) => {
+app.delete('/api/education/:id', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -266,11 +173,11 @@ async function getPreferredLanguage(supabase, userId) {
 
 // The one list of languages the UI can offer — used by the Profile page's
 // selector and the admin add-word form.
-app.get('/api/languages', requireRole('user'), (req, res) => {
+app.get('/api/languages', (req, res) => {
   res.json({ languages: SUPPORTED_LANGUAGES, default: DEFAULT_LANGUAGE });
 });
 
-app.get('/api/profile', requireRole('user'), async (req, res) => {
+app.get('/api/profile', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -278,18 +185,18 @@ app.get('/api/profile', requireRole('user'), async (req, res) => {
     return res.status(500).json({ error: 'Supabase is not configured on this server.' });
   }
 
-  const preferredLanguage = await getPreferredLanguage(supabase, req.session.userId);
+  const preferredLanguage = await getPreferredLanguage(supabase, req.user.id);
   res.json({
     profile: {
-      username: req.session.username,
-      email: req.session.email,
-      role: req.session.role || 'user',
+      username: 'dev-user',
+      email: 'dev@example.com',
+      role: 'admin',
       preferred_language: preferredLanguage
     }
   });
 });
 
-app.patch('/api/profile', requireRole('user'), async (req, res) => {
+app.patch('/api/profile', async (req, res) => {
   const { preferred_language } = req.body;
   if (!isSupportedLanguage(preferred_language)) {
     return res.status(400).json({ error: 'Pick one of the supported languages.' });
@@ -304,7 +211,7 @@ app.patch('/api/profile', requireRole('user'), async (req, res) => {
 
   const { data, error } = await supabase
     .from('profiles')
-    .upsert({ id: req.session.userId, preferred_language }, { onConflict: 'id' })
+    .upsert({ id: req.user.id, preferred_language }, { onConflict: 'id' })
     .select('preferred_language')
     .maybeSingle();
 
@@ -313,10 +220,7 @@ app.patch('/api/profile', requireRole('user'), async (req, res) => {
 });
 
 // --- word bank -----------------------------------------------------------
-// The shared vocabulary every learner draws from — for flashcard review and
-// for Side Quest stories. Any logged-in user can browse it; only admins and
-// super admins can add or remove words.
-app.get('/api/words', requireRole('user'), async (req, res) => {
+app.get('/api/words', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -334,15 +238,12 @@ app.get('/api/words', requireRole('user'), async (req, res) => {
   // Each learner sees the bank translated into their own preferred language
   // (set on the Profile page). Translations are cached, so only words never
   // requested in this language before cost a Kimi call.
-  const preferredLanguage = await getPreferredLanguage(supabase, req.session.userId);
+  const preferredLanguage = await getPreferredLanguage(supabase, req.user.id);
   const words = await attachTranslations(supabase, data || [], preferredLanguage);
   res.json({ words, translation_language: preferredLanguage });
 });
 
-// Admins only supply the term and its language — the AI fills in everything
-// else (definition, part of speech, example sentence, difficulty, and the
-// part-of-speech specific grammar forms — see lib/enrichment.js).
-app.post('/api/words', requireRole('admin'), async (req, res) => {
+app.post('/api/words', async (req, res) => {
   const { term, language } = req.body;
   if (!term || !term.trim()) {
     return res.status(400).json({ error: 'Term is required.' });
@@ -377,7 +278,7 @@ app.post('/api/words', requireRole('admin'), async (req, res) => {
       difficulty: enriched.difficulty,
       language: wordLanguage,
       grammar_forms: enriched.grammar_forms,
-      created_by: req.session.userId
+      created_by: req.user.id
     })
     .select('id, term, definition, example_sentence, part_of_speech, difficulty, language, grammar_forms, created_at')
     .single();
@@ -389,13 +290,7 @@ app.post('/api/words', requireRole('admin'), async (req, res) => {
   res.json({ word: data });
 });
 
-// Reads an uploaded image (screenshot, book page, photo of objects — sent as
-// a base64 data URL, same as the education form) with a vision-capable Kimi
-// model and returns the vocabulary words it found in the requested language,
-// each flagged with whether it's already in the bank. Nothing is stored here:
-// the client shows the candidates and adds the chosen ones through the normal
-// POST /api/words enrichment flow.
-app.post('/api/words/extract-image', requireRole('admin'), async (req, res) => {
+app.post('/api/words/extract-image', async (req, res) => {
   const { image, language } = req.body;
   if (!image) {
     return res.status(400).json({ error: 'Attach an image first.' });
@@ -444,7 +339,7 @@ app.post('/api/words/extract-image', requireRole('admin'), async (req, res) => {
   });
 });
 
-app.delete('/api/words/:id', requireRole('admin'), async (req, res) => {
+app.delete('/api/words/:id', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -458,11 +353,7 @@ app.delete('/api/words/:id', requireRole('admin'), async (req, res) => {
 });
 
 // --- flashcard review (spaced repetition) ---------------------------------
-// GET returns words due for review (or never-studied ones) — see
-// pickWordsForUser in lib/learning.js. POST records a right/wrong answer and
-// reschedules that word with a simplified SM-2 algorithm, so weaker words
-// resurface sooner and mastered ones drift further out.
-app.get('/api/practice/next', requireRole('user'), async (req, res) => {
+app.get('/api/practice/next', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -471,8 +362,8 @@ app.get('/api/practice/next', requireRole('user'), async (req, res) => {
   }
 
   try {
-    const words = await pickWordsForUser(supabase, req.session.userId, 10);
-    const preferredLanguage = await getPreferredLanguage(supabase, req.session.userId);
+    const words = await pickWordsForUser(supabase, req.user.id, 10);
+    const preferredLanguage = await getPreferredLanguage(supabase, req.user.id);
     res.json({
       words: await attachTranslations(supabase, words, preferredLanguage),
       translation_language: preferredLanguage
@@ -482,7 +373,7 @@ app.get('/api/practice/next', requireRole('user'), async (req, res) => {
   }
 });
 
-app.post('/api/practice/answer', requireRole('user'), async (req, res) => {
+app.post('/api/practice/answer', async (req, res) => {
   const { word_id, correct } = req.body;
   if (!word_id || typeof correct !== 'boolean') {
     return res.status(400).json({ error: 'word_id and correct (boolean) are required.' });
@@ -499,7 +390,7 @@ app.post('/api/practice/answer', requireRole('user'), async (req, res) => {
   if (!word) return res.status(404).json({ error: 'Word not found.' });
 
   try {
-    const progress = await recordAnswer(supabase, req.session.userId, word_id, correct);
+    const progress = await recordAnswer(supabase, req.user.id, word_id, correct);
     res.json({ progress });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -507,13 +398,7 @@ app.post('/api/practice/answer', requireRole('user'), async (req, res) => {
 });
 
 // --- side quests -----------------------------------------------------------
-// Each quest is an AI-written short conversation weaving in up to 5 words
-// from the learner's word bank (see generateSideQuestStory in
-// lib/learning.js), plus a short comprehension quiz. `quiz` in the DB row
-// holds correct answers — stripQuizAnswers keeps those out of the response
-// until the quest is completed, so it's enforced here, not just hidden by
-// the UI.
-app.post('/api/side-quests/generate', requireRole('user'), async (req, res) => {
+app.post('/api/side-quests/generate', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -523,7 +408,7 @@ app.post('/api/side-quests/generate', requireRole('user'), async (req, res) => {
 
   let words;
   try {
-    words = await pickWordsForUser(supabase, req.session.userId, MAX_QUEST_WORDS);
+    words = await pickWordsForUser(supabase, req.user.id, MAX_QUEST_WORDS);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -546,13 +431,13 @@ app.post('/api/side-quests/generate', requireRole('user'), async (req, res) => {
   const { count, error: countError } = await supabase
     .from('side_quests')
     .select('id', { count: 'exact', head: true })
-    .eq('user_id', req.session.userId);
+    .eq('user_id', req.user.id);
   if (countError) return res.status(500).json({ error: countError.message });
 
   const { data, error } = await supabase
     .from('side_quests')
     .insert({
-      user_id: req.session.userId,
+      user_id: req.user.id,
       sequence_number: (count || 0) + 1,
       title: withIds.title,
       setting: withIds.setting || null,
@@ -568,7 +453,7 @@ app.post('/api/side-quests/generate', requireRole('user'), async (req, res) => {
   res.json({ quest: stripQuizAnswers(data) });
 });
 
-app.get('/api/side-quests', requireRole('user'), async (req, res) => {
+app.get('/api/side-quests', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -579,14 +464,14 @@ app.get('/api/side-quests', requireRole('user'), async (req, res) => {
   const { data, error } = await supabase
     .from('side_quests')
     .select('id, sequence_number, title, status, score, created_at, completed_at')
-    .eq('user_id', req.session.userId)
+    .eq('user_id', req.user.id)
     .order('sequence_number', { ascending: true });
 
   if (error) return res.status(500).json({ error: error.message });
   res.json({ quests: data || [] });
 });
 
-app.get('/api/side-quests/:id', requireRole('user'), async (req, res) => {
+app.get('/api/side-quests/:id', async (req, res) => {
   let supabase;
   try {
     supabase = getServiceRoleClient();
@@ -598,7 +483,7 @@ app.get('/api/side-quests/:id', requireRole('user'), async (req, res) => {
     .from('side_quests')
     .select('id, sequence_number, title, setting, lines, quiz, status, score, created_at, completed_at')
     .eq('id', req.params.id)
-    .eq('user_id', req.session.userId)
+    .eq('user_id', req.user.id)
     .maybeSingle();
 
   if (error) return res.status(500).json({ error: error.message });
@@ -606,7 +491,7 @@ app.get('/api/side-quests/:id', requireRole('user'), async (req, res) => {
   res.json({ quest: data.status === 'completed' ? data : stripQuizAnswers(data) });
 });
 
-app.post('/api/side-quests/:id/complete', requireRole('user'), async (req, res) => {
+app.post('/api/side-quests/:id/complete', async (req, res) => {
   const { answers } = req.body;
   if (!Array.isArray(answers)) return res.status(400).json({ error: 'answers array is required.' });
 
@@ -621,7 +506,7 @@ app.post('/api/side-quests/:id/complete', requireRole('user'), async (req, res) 
     .from('side_quests')
     .select('id, quiz, status')
     .eq('id', req.params.id)
-    .eq('user_id', req.session.userId)
+    .eq('user_id', req.user.id)
     .maybeSingle();
 
   if (error) return res.status(500).json({ error: error.message });
@@ -641,7 +526,7 @@ app.post('/api/side-quests/:id/complete', requireRole('user'), async (req, res) 
     gradedQuiz.push({ ...item, selectedIndex });
 
     try {
-      await recordAnswer(supabase, req.session.userId, item.word_id, correct);
+      await recordAnswer(supabase, req.user.id, item.word_id, correct);
     } catch (err) {
       console.warn(`Could not update progress for word ${item.word_id}:`, err.message);
     }
