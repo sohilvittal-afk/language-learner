@@ -54,20 +54,19 @@ function renderNav(activePage) {
       const role = ROLE_HIERARCHY.includes(data.role) ? data.role : 'user';
 
       menusEl.innerHTML = [
-        menu('Learn', [
-          { key: 'practice', href: '/practice.html', title: 'Practice', desc: 'Flashcard review, due words first' },
-          { key: 'side-quests', href: '/side-quests.html', title: 'Side Quests', desc: 'Story-driven word journeys' },
-          { key: 'words', href: '/words.html', title: 'Word Bank', desc: 'Browse every word on the platform' }
+        `<div class="topnav-item">
+          <a href="/dashboard.html" class="topnav-link${activePage === 'dashboard' ? ' active' : ''}">Dashboard</a>
+        </div>`,
+        menu('Levels', [
+          { key: 'level5', href: '/level5.html', title: 'Level 5', desc: 'Level 5 content' },
+          { key: 'level6', href: '/level6.html', title: 'Level 6', desc: 'Level 6 content' }
         ]),
-        menu('Dashboard', [
-          { key: 'dashboard', href: '/dashboard.html', title: 'Overview', desc: 'Your account & education feed' }
-        ]),
-        data.loggedIn && navRoleAtLeast(role, 'admin')
-          ? menu('Manage', [
-              { key: 'words', href: '/words.html', title: 'Word Bank', desc: 'Add or remove vocabulary' },
-              { key: 'dashboard', href: '/dashboard.html', title: 'Users & Content', desc: 'On the Dashboard page' }
-            ])
-          : ''
+        `<div class="topnav-item">
+          <a href="/profile.html" class="topnav-link${activePage === 'profile' ? ' active' : ''}">Profile</a>
+        </div>`,
+        `<div class="topnav-item">
+          <a href="/admin.html" class="topnav-link${activePage === 'admin' ? ' active' : ''}">Admin</a>
+        </div>`
       ].join('');
 
       if (data.loggedIn) {
